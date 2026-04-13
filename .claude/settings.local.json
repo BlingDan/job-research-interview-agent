@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv pip:*)",
+      "Bash(.venv/Scripts/python -c \"from fastapi.responses import StreamingResponse; print\\(StreamingResponse\\)\")",
+      "Bash(.venv/Scripts/pip install:*)",
+      "Bash(.venv/Scripts/python -m pip install starlette)",
+      "Bash(pip install:*)",
+      "Bash(python -c \"from fastapi.responses import StreamingResponse; print\\('OK:', StreamingResponse\\)\")",
+      "Bash(pip --version)",
+      "Bash(.venv/Scripts/python.exe -c \"import sys; print\\('\\\\\\\\n'.join\\(sys.path\\)\\)\")",
+      "Bash(uv --version)",
+      "Bash(.venv/Scripts/python.exe -c \"from fastapi.responses import StreamingResponse; print\\('OK:', StreamingResponse\\)\")"
+    ]
+  }
+}
