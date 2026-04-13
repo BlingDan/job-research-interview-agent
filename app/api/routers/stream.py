@@ -10,7 +10,7 @@ async def stream_generator():
         "planning_started",
         "search_started",
         "rag_started",
-        "report_gererating",
+        "report_generating",
         "finish"
     ]
 
