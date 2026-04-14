@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-
+from app.schemas.report import PlanningItem, SearchResultItem, ReportSection, ReportPayload
 
 class TaskCreateRequest(BaseModel):
     jd_text: str
@@ -12,3 +12,7 @@ class TaskCreateRequest(BaseModel):
 class TaskCreateResponse(BaseModel):
     task_id: str
     status: str
+    planning: list[PlanningItem]
+    research_results: list[SearchResultItem]
+    local_context_summary: str | None = None
+    report: ReportPayload
