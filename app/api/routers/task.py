@@ -1,7 +1,7 @@
 import uuid
 from fastapi import APIRouter
 from app.schemas.task import TaskCreateRequest,TaskCreateResponse
-from app.services.orchestration_service import run_mock_research
+from app.services.orchestration_service import run_research
 
 
 # 创建一个路由组，打上标签 task
@@ -14,4 +14,4 @@ def create_task(payload: TaskCreateRequest):
     task_id = str(uuid.uuid4())   
     
     
-    return run_mock_research(task_id, payload)
+    return run_research(task_id, payload)

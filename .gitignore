@@ -57,6 +57,8 @@ Thumbs.db
 *.tmp
 *.temp
 Record.md
+reference_docs/
+workspace/
 
 # Pyright
 pyrightconfig.json

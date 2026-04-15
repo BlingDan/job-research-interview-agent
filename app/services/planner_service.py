@@ -23,6 +23,6 @@ def build_planning(payload: TaskCreateRequest) -> list[PlanningItem]:
         PlanningItem(
             step=4, 
             title="形成建议", 
-            objective="输出差距分析与西医不准备动作"),
+            objective="输出差距分析与下一步准备动作"),
     ]
     return planning

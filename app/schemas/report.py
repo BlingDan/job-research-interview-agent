@@ -6,6 +6,7 @@ class PlanningItem(BaseModel):
     objective: str
 
 class SearchResultItem(BaseModel):
+    category: str | None = None  # 给搜索结果一个标签，否则一但每个query返回多条结果，report层就无法通过数组下标来判断
     query: str
     title: str
     snippet: str
