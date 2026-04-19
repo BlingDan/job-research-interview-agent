@@ -16,13 +16,14 @@ class ResearchCoordinator:
         self.task_id = task_id
         self.payload = payload
         self.settings = get_settings()
-        self.task_dir = Path(self.settings.workspace_root)/"tasks"/task_id
+        self.task_dir.mkdir(parents=True, exist_ok=True)
+        # self.task_dir = Path(self.settings.workspace_root)/"tasks"/task_id
         self.state = ResearchState(task_id=task_id, input=payload)
     
     def run(self) -> ResearchState:
         self.plan()
-        self.execute_task
-        self.build_final_report
+        self.execute_task()
+        self.build_final_report()
         self.persist_status()
 
         return self.state

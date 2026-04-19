@@ -14,18 +14,26 @@ class TodoItem(BaseModel):
     title: str
     intent: str
     query: str
+    category: str | None = None
     status: TodoStatus = "pending"
     sources: list[str] = Field(default_factory=list)
     summary_path: str | None = None
 
-# 相中中间研究笔记之后 再汇总
+# 完成中间研究笔记之后 再汇总
 class TaskSummary(BaseModel):
     todo_id: str
     title: str
-    summary: str
+    category: str | None = None
+    question_answered: str
+    key_points: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+    needs_followup: bool = False
+    followup_queries: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
+    summary_markdown: str
     raw_search_path: str | None = None
     summary_path: str | None = None
+    summary_json_path: str | None = None
 
 
 # 保存整轮任务状态
