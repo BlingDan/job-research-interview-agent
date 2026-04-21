@@ -1,7 +1,13 @@
-import os
+import time
 from typing import Iterator, List, Optional
 
 from openai import OpenAI
+
+from app.core.config import get_settings
+
+
+_MAX_RATE_LIMIT_RETRIES = 2
+_INITIAL_RATE_LIMIT_BACKOFF_SECONDS = 1.0
 
 
 class JobResearchLLM:
@@ -17,12 +23,14 @@ class JobResearchLLM:
         timeout: Optional[int] = None,
         **kwargs,
     ):
-        self.model = model or os.getenv("LLM_MODEL_ID", "gpt-3.5-turbo")
-        self.api_key = api_key or os.getenv("LLM_API_KEY")
-        self.base_url = base_url or os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
+        settings = get_settings()
+
+        self.model = model or settings.llm_model_id
+        self.api_key = api_key or settings.llm_api_key
+        self.base_url = base_url or settings.llm_base_url
         self.temperature = temperature
         self.max_tokens = max_tokens or 4096
-        self.timeout = timeout or int(os.getenv("LLM_TIMEOUT", "20"))
+        self.timeout = timeout or settings.llm_timeout
 
         if not self.model:
             raise ValueError("Model ID is required.")
@@ -34,6 +42,28 @@ class JobResearchLLM:
             base_url=self.base_url,
             timeout=self.timeout,
         )
+
+    def _is_rate_limit_error(self, exc: Exception) -> bool:
+        if getattr(exc, "status_code", None) == 429:
+            return True
+
+        response = getattr(exc, "response", None)
+        return getattr(response, "status_code", None) == 429
+
+    def _get_rate_limit_backoff_seconds(self, exc: Exception, retry_index: int) -> float:
+        response = getattr(exc, "response", None)
+        headers = getattr(response, "headers", None) or {}
+        retry_after = headers.get("retry-after")
+
+        if retry_after is not None:
+            try:
+                retry_after_seconds = float(retry_after)
+                if retry_after_seconds >= 0:
+                    return retry_after_seconds
+            except (TypeError, ValueError):
+                pass
+
+        return _INITIAL_RATE_LIMIT_BACKOFF_SECONDS * (2**retry_index)
 
     def _build_request_kwargs(
         self,
@@ -52,14 +82,24 @@ class JobResearchLLM:
 
     def _call_completion(self, messages: List[dict[str, str]], stream: bool):
         request_kwargs = self._build_request_kwargs(messages=messages, stream=stream)
-        try:
-            return self.client.chat.completions.create(**request_kwargs)
-        except TypeError as exc:
-            # Some OpenAI-compatible gateways reject max_tokens for specific models.
-            if "max_tokens" in str(exc) and "max_tokens" in request_kwargs:
-                request_kwargs.pop("max_tokens", None)
+        rate_limit_retries = 0
+
+        while True:
+            try:
                 return self.client.chat.completions.create(**request_kwargs)
-            raise
+            except TypeError as exc:
+                # Some OpenAI-compatible gateways reject max_tokens for specific models.
+                if "max_tokens" in str(exc) and "max_tokens" in request_kwargs:
+                    request_kwargs.pop("max_tokens", None)
+                    continue
+                raise
+            except Exception as exc:
+                if self._is_rate_limit_error(exc) and rate_limit_retries < _MAX_RATE_LIMIT_RETRIES:
+                    backoff_seconds = self._get_rate_limit_backoff_seconds(exc, rate_limit_retries)
+                    time.sleep(backoff_seconds)
+                    rate_limit_retries += 1
+                    continue
+                raise
 
     def invoke(self, messages: List[dict[str, str]]) -> str:
         """Run a non-streaming completion call and return the full text."""

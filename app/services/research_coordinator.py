@@ -1,162 +1,124 @@
-from __future__ import annotations
-
 import json
 from pathlib import Path
 
 from app.core.config import get_settings
-from app.schemas.event import ResearchEvent
-from app.schemas.state import ResearchState, TodoItem, TaskSummary
-from app.schemas.report import PlanningItem
+from app.schemas.state import ResearchState
 from app.schemas.task import TaskCreateRequest
-from app.services.search_service import run_web_research
-
+from app.services.planner_service import build_planning
+from app.services.report_service import build_report, render_report_markdown
+from app.services.search_service import run_task_search
+from app.services.summarizer_service import build_task_summary
+from app.services.rag_service import ingest_local_document
+from app.tools.retriever_tool import get_local_context
 
 class ResearchCoordinator:
     def __init__(self, task_id: str, payload: TaskCreateRequest):
         self.task_id = task_id
         self.payload = payload
         self.settings = get_settings()
+        self.task_dir = Path(self.settings.workspace_root) / "tasks" / task_id
         self.task_dir.mkdir(parents=True, exist_ok=True)
-        # self.task_dir = Path(self.settings.workspace_root)/"tasks"/task_id
         self.state = ResearchState(task_id=task_id, input=payload)
-    
+
     def run(self) -> ResearchState:
-        self.plan()
-        self.execute_task()
-        self.build_final_report()
-        self.persist_status()
+        try:
+            self.plan()
+            self.build_local_knowledge()
+            self.execute_tasks()
+            self.build_final_report()
+        except Exception as exc:
+            self.state.status = "failed"
+            self.state.error = str(exc)
+            raise
+        finally:
+            self.persist_status()
 
         return self.state
-        
 
     def plan(self) -> None:
         self.state.status = "planning"
-
-        # TODO 真正的 LLM 调用
-        self.state.planning = [
-            TodoItem(
-                id="todo-1",
-                title="JD 关键能力拆解",
-                intent="提取岗位高频技能与核心要求",
-                query=self.payload.jd_text[:80],
-            ),
-            TodoItem(
-                id="todo-2",
-                title="公司与业务背景调研",
-                intent="梳理公司业务、技术栈与团队可能关注点",
-                query=self.payload.company_name or "目标公司 业务 技术栈",
-            ),
-            TodoItem(
-                id="todo-3",
-                title="面试主题准备",
-                intent="整理该岗位可能出现的高频面试点",
-                query=self.payload.interview_topic or "岗位 高频面试问题",
-            ),
-        ]
-
+        self.state.planning = build_planning(self.payload)
         self._write_json("planning.json", [item.model_dump() for item in self.state.planning])
 
-    def execute_task(self) -> None:
+    def build_local_knowledge(self) -> None:
+        local_path = (self.payload.local_context_path or "").strip()
+
+        if not local_path:
+            return
+        
+        ingest_local_document(
+            local_path,
+            doc_type="other",
+            original_filename=Path(local_path).name,
+        )
+
+
+    def execute_tasks(self) -> None:
         self.state.status = "executing"
-        all_result = []
 
-        # Why start from 1? Because the planning step is more like a "table of contents" for the report, and the actual research tasks start from step 1. This way, the report can directly use the step number to reference the corresponding research task without needing to adjust for an offset. It keeps the numbering intuitive and aligned with the actual tasks being executed.
-        for index, todo in enumerate(self.state.planning, start=1):
+        for todo in self.state.planning:
             todo.status = "running"
-
-            planning_item = PlanningItem(
-                step=index,
-                title=todo.title,
-                objective=todo.intent,
+w
+            results, _, _ = run_task_search(
+                task_id=self.task_id,
+                todo=todo,
+                payload=self.payload,
             )
 
-            results, _, _ = run_web_research(
+            local_bundle = get_local_context(todo.query)
+            self.state.local_context = self._merge_local_context(
+                self.state.local_context,
+                local_bundle.summary,
+            )
+
+            summary = build_task_summary(
                 task_id=self.task_id,
-                payload=self.payload,
-                planning=[planning_item],
+                todo=todo,
+                results=results,
+                task_dir=self.task_dir,
+                local_context=local_bundle.summary,
             )
 
             todo.status = "completed"
-            todo.sources = [item.source for item in results]
-            all_result.extend(results)
+            todo.sources = summary.sources
+            todo.summary_path = summary.summary_path
 
+            self.state.task_summaries.append(summary)
+            self.state.search_results.extend(results)
 
-            raw_path = f"task_{index}_search.json"
-            self._write_json(raw_path, [item.model_dump() for item in results])
-            
-            summary_text = self._build_summary_text(todo, results)
-            summary_path = f"task_{index}_summary.md"
-            self._write_text(summary_path, summary_text)
-            todo.summary_path = str(self.task_dir/summary_path)
-
-            self.state.task_summaries.append(
-                TaskSummary(
-                    todo_id=todo.id,
-                    title=todo.title,
-                    summary=summary_text,
-                    sources=todo.sources,
-                    raw_search_path=str(self.task_dir/raw_path),
-                    summary_path=str(self.task_dir/summary_path),
-                )
-            )
-        
-        self.state.search_results = all_result
-        # self.state.status = "completed"
-    
     def build_final_report(self) -> None:
         self.state.status = "reporting"
-
-        # TODO LLM 生成最终报告
-        from app.schemas.report import ReportPayload, ReportSection
-
-        sections = []
-        for item in self.state.task_summaries:
-            sections.append(
-                ReportSection(
-                    title=item.title,
-                    bullets=[item.summary[:120]],
-                )
-            )
-
-        self.state.report = ReportPayload(
-            title="面试准备研究报告",
-            summary="已按规划、执行、汇总三阶段完成研究流程。",
-            sections=sections,
-            next_actions=[
-                "补充更细的岗位技术映射",
-                "补充本地资料与候选人项目经验对应关系",
-            ],
-        )
-
-        report_md = "# 面试准备研究报告\n\n"
-        report_md += self.state.report.summary + "\n\n"
-        for section in self.state.report.sections:
-            report_md += f"## {section.title}\n"
-            for bullet in section.bullets:
-                report_md += f"- {bullet}\n"
-            report_md += "\n"
-
-        self._write_text("report.md", report_md)
+        report = build_report(self.state)
+        self.state.report = report
+        self._write_json("report.json", report.model_dump())
+        self._write_text("report.md", render_report_markdown(report))
         self.state.status = "done"
 
     def persist_status(self) -> None:
         self._write_json("state.json", self.state.model_dump())
+    
+    def _merge_local_context(self, current: str | None, new_value: str | None) -> str | None:
+        """合并新的本地知识摘要到现有的 local_context 字段中，去重并用换行分隔。
+         - current: 当前已有的 local_context 内容
+         - new_value: 新的本地知识摘要内容
+        """
+        values = [item.strip() for item in [current or "", new_value or ""] if item and item.strip()]
+        if not values:
+            return None
 
-    def _build_summary_text(self, todo: TodoItem, results) -> str:
-        lines = [f"## 任务：{todo.title}", ""]
-        lines.append(f"目标：{todo.intent}")
-        lines.append("")
-        lines.append("### 关键结果")
-        for item in results[:5]:
-            lines.append(f"- {item.title} | {item.source}")
-        return "\n".join(lines)
-
-
-    def _write_json (self, filename: str, data) -> None:
+        deduped: list[str] = []
+        for item in values:
+            if item not in deduped:
+                deduped.append(item)
+        return "\n\n".join(deduped)
+        
+    def _write_json(self, filename: str, data) -> None:
         (self.task_dir / filename).write_text(
             json.dumps(data, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
-    
+
     def _write_text(self, filename: str, content: str) -> None:
-        (self.task_dir/filename).write_text(content, encoding="utf-8")
+        (self.task_dir / filename).write_text(content, encoding="utf-8")
+    
+    

@@ -66,7 +66,6 @@ def _build_user_prompt(payload: TaskCreateRequest) -> str:
 
 def generate_planning_text(payload: TaskCreateRequest) -> str:
     llm = JobResearchLLM(
-        model="glm-5.1",
         temperature=0.2,
         max_tokens=2048,
     )

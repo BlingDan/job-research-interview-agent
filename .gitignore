@@ -59,7 +59,11 @@ Thumbs.db
 Record.md
 reference_docs/
 workspace/
+model/
 
 # Pyright
 pyrightconfig.json
 .ace-tool/
+
+# Other
+*/superpowers/
