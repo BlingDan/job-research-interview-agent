@@ -40,6 +40,7 @@ env/
 
 # Testing
 .pytest_cache/
+.pytest_tmp/
 .coverage
 htmlcov/
 .tox/
@@ -59,6 +60,7 @@ Thumbs.db
 Record.md
 reference_docs/
 workspace/
+workspaces/
 model/
 
 # Pyright

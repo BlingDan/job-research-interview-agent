@@ -9,7 +9,7 @@ from app.services.report_service import build_report, render_report_markdown
 from app.services.search_service import run_task_search
 from app.services.summarizer_service import build_task_summary
 from app.services.rag_service import ingest_local_document
-from app.tools.retriever_tool import get_local_context
+from app.tools.retriever_tool import get_doc_type_filter, get_local_context
 
 class ResearchCoordinator:
     def __init__(self, task_id: str, payload: TaskCreateRequest):
@@ -58,14 +58,17 @@ class ResearchCoordinator:
 
         for todo in self.state.planning:
             todo.status = "running"
-w
+
             results, _, _ = run_task_search(
                 task_id=self.task_id,
                 todo=todo,
                 payload=self.payload,
             )
 
-            local_bundle = get_local_context(todo.query)
+            local_bundle = get_local_context(
+                todo.query,
+                doc_types=get_doc_type_filter(todo.category)
+            )
             self.state.local_context = self._merge_local_context(
                 self.state.local_context,
                 local_bundle.summary,

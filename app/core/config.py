@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     search_topic: Literal["general", "news", "finance"] = "general"
     search_depth: Literal["basic", "advanced", "fast", "ultra-fast"] = "basic"  
 
-    workspace_root: str = "workspaces"
+    workspace_root: str = "workspace"
     
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -25,8 +25,8 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    knowledge_base_dir: str = "workspaces/knowledge_base"
-    rag_index_dir: str = "workspaces/knowledge_base/vector_index"
+    knowledge_base_dir: str = "workspace/knowledge_base"
+    rag_index_dir: str = "workspace/knowledge_base/vector_index"
     rag_embedding_backend: Literal["huggingface", "openai"] = "huggingface"
     rag_embedding_model: str = "BAAI/bge-small-zh-v1.5"
     rag_model_cache_dir: str = "model"

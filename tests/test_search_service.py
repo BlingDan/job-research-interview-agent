@@ -44,6 +44,25 @@ def test_normalize_search_results_cleans_text_and_preserves_metadata() -> None:
     assert results[0].todo_id == todo.id
 
 
+def test_normalize_search_results_supports_tavily_url_and_content() -> None:
+    todo = _make_todo()
+    payload = {
+        "results": [
+            {
+                "title": "Tavily Result",
+                "url": "https://example.com/tavily",
+                "content": "  FastAPI \n RAG\tAgent 真实搜索结果  ",
+            }
+        ]
+    }
+
+    results = normalize_search_results(todo, payload)
+
+    assert len(results) == 1
+    assert results[0].source == "https://example.com/tavily"
+    assert results[0].snippet == "FastAPI RAG Agent 真实搜索结果"
+
+
 def test_prepare_research_context_filters_invalid_sources_from_summary() -> None:
     results = [
         SearchResultItem(

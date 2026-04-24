@@ -88,8 +88,8 @@ def normalize_search_results(
 
     for raw_item in payload.get("results", []):
         title = raw_item.get("title") or "Untitled"
-        source = raw_item.get("source") or "Unknown"
-        snippet = _clean_text(raw_item.get("snippet") or "", max_length=280)
+        source = raw_item.get("source") or raw_item.get("url") or "Unknown"
+        snippet = _clean_text(raw_item.get("snippet") or raw_item.get("content") or "", max_length=280)
         if not snippet:
             snippet = "No snippet available, consider turn on 'include_raw_content'"
         

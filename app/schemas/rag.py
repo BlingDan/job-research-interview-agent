@@ -39,4 +39,4 @@ class LocalContextHit(BaseModel):
 class LocalContextBundle(BaseModel):
     query: str
     summary: str
-    hits: list[LocalContextHit] 
+    hits: list[LocalContextHit] = Field(default_factory=list)

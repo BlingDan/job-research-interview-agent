@@ -6,6 +6,7 @@ from typing import cast, get_args
 from pydantic import SecretStr
 from langchain_community.document_loaders import PyPDFLoader, TextLoader, UnstructuredWordDocumentLoader
 from langchain_community.vectorstores import FAISS
+from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_openai import OpenAIEmbeddings
@@ -16,6 +17,8 @@ from app.schemas.rag import DocType, LocalContextBundle, LocalContextHit, LocalD
 
 
 VALID_DOC_TYPES = set(get_args(DocType))
+PARENT_MANIFEST_FILENAME = "parents.json"
+PARENT_EXCERPT_CHARS = 1000
 
 
 # 1. 加载文件
@@ -36,6 +39,7 @@ def ingest_local_document(
 
     # 1. 加载文件
     docs = load_files(source_path, doc_type=doc_type, original_filename=original_filename)
+    save_parent_records(docs)
     # 2. 切块
     chunks = split_documents(docs)
     # 3. 建 FAISS
@@ -161,13 +165,15 @@ def load_vectorstore() -> FAISS | None:
         allow_dangerous_deserialization=True, 
     )
 
-def retrive_local_context(
+def retrieve_local_context(
     query: str,
     *,
     top_k: int | None = None,
     doc_type_filter: list[DocType] | None = None,
 ) -> LocalContextBundle:
     """根据查询，从本地向量库中检索相关内容"""
+
+    # 还在本地 FAISS 向量库
     settings = get_settings()
     vectorstore = load_vectorstore()
     if vectorstore is None:
@@ -177,30 +183,58 @@ def retrive_local_context(
             hits=[],
         )
     
-    retriever = vectorstore.as_retriever(
-        search_type="similarity",
-        search_kwargs={"k": top_k or settings.rag_top_k},
-    )
-    docs = retriever.invoke(query)
+    # 去除向量库里的所有 chunk
+    all_docs = load_all_index_documents()
+    candidate_docs = all_docs
 
-    # 按照文档类型过略检索结果
     if doc_type_filter:
-        docs = [
-            doc for doc in docs
+        # 现在所有文档中筛选符合类型要求的文档，作为后续检索的候选集
+        candidate_docs = [
+            doc for doc in all_docs
             if _metadata_doc_type(doc) in doc_type_filter
         ]
+
+    # 向量检索和 BM25 检索，分别取前 K 个结果，然后用 RRF 融合排序，最后返回前 K 个结果
+    vector_retriever = vectorstore.as_retriever(
+        search_type="similarity",
+        search_kwargs={"k": settings.rag_vector_k},
+    )
+    vector_docs = vector_retriever.invoke(query)
+
+    if doc_type_filter:
+        vector_docs = [
+            doc for doc in vector_docs
+            if doc.metadata.get("doc_type") in doc_type_filter
+        ]
     
+    bm25_docs: list[Document] = []
+    if candidate_docs:
+        bm25_retriever = BM25Retriever.from_documents(
+            candidate_docs,
+            k=settings.rag_bm25_k,
+        )
+        bm25_docs = bm25_retriever.invoke(query)
+
+    fused_docs = rrf_rerank(
+        vector_docs=vector_docs,
+        bm25_docs=bm25_docs,
+        k=settings.rag_rrf_k,
+    )
+    final_docs = collapse_parent_documents(fused_docs)[: top_k or settings.rag_top_k]
+    attach_parent_excerpts(final_docs)
+
     hits = [
         LocalContextHit(
             content=doc.page_content,
-            source=_metadata_text(doc, "source"),
-            doc_type=_metadata_doc_type(doc),
-            parent_id=_metadata_text(doc, "parent_id"),
-            chunk_id=_metadata_text(doc, "chunk_id"),
-            retrieval_mode="vector",
-            metadata=dict(doc.metadata),
+            source=doc.metadata.get("source"),
+            doc_type=doc.metadata.get("doc_type"),
+            parent_id=doc.metadata.get("parent_id"),
+            chunk_id=doc.metadata.get("chunk_id"),
+            score=doc.metadata.get("rrf_score"),
+            retrieval_mode=doc.metadata.get("retrieval_mode", "hybrid"),
+            metadata=doc.metadata,
         )
-        for doc in docs[: settings.rag_top_k]
+        for doc in final_docs
     ]
 
     return LocalContextBundle(
@@ -208,6 +242,63 @@ def retrive_local_context(
         summary=render_local_context(query, hits),
         hits=hits,
     )
+
+def rrf_rerank(
+    *,
+    vector_docs: list[Document],
+    bm25_docs: list[Document],
+    k: int = 60,
+) -> list[Document]:
+    """使用 Reciprocal Rank Fusion (RRF) 算法融合两种检索结果"""
+    scores: dict[str, float] = {}
+    docs_by_key: dict[str, Document] = {} # 每个 chunk_id 对应的 Document 对象
+    modes_by_key: dict[str, set[str]] = {} # 每个 chunk 被哪些检索方式命中过
+
+    def doc_key(doc: Document) -> str:
+        return str(doc.metadata.get("chunk_id") or hash(doc.page_content))
+
+    def add_docs(docs: list[Document], mode: str) -> None:
+        for rank, doc in enumerate(docs, start=1):
+            key = doc_key(doc)
+            scores[key] = scores.get(key, 0.0) + 1.0  / (k + rank)
+            docs_by_key.setdefault(key, doc)
+            modes_by_key.setdefault(key, set()).add(mode)
+
+    add_docs(vector_docs, "vector")
+    add_docs(bm25_docs, "bm25")
+
+    reranked = sorted(
+        docs_by_key.values(),
+        key=lambda doc: scores[doc_key(doc)],
+        reverse=True,
+    )
+
+    for doc in reranked:
+        key = doc_key(doc)
+        doc.metadata["rrf_score"] = scores[key]
+        modes = modes_by_key[key]
+        doc.metadata["retrieval_mode"] = "hybrid" if len(modes) > 1 else next(iter(modes))
+
+    return reranked
+
+
+def collapse_parent_documents(docs: list[Document]) -> list[Document]:
+    """同一父文档只保留最高排序的 chunk，减少重复上下文。"""
+    collapsed: list[Document] = []
+    seen_parent_keys: set[str] = set()
+
+    for doc in docs:
+        key = str(
+            doc.metadata.get("parent_id")
+            or doc.metadata.get("chunk_id")
+            or hash(doc.page_content)
+        )
+        if key in seen_parent_keys:
+            continue
+        seen_parent_keys.add(key)
+        collapsed.append(doc)
+
+    return collapsed
 
 def render_local_context(query: str, hits: list[LocalContextHit]) -> str:
     """把检索到的本地资料渲染成文本形式，方便 LLM 直接阅读"""
@@ -219,15 +310,19 @@ def render_local_context(query: str, hits: list[LocalContextHit]) -> str:
     current_length = 0
 
     for index, hit in enumerate(hits, start=1):
+        parent_excerpt = hit.metadata.get("parent_excerpt")
+        parent_excerpt_text = str(parent_excerpt).strip() if parent_excerpt else ""
         block = "\n".join(
-            [
+            [line for line in [
                 f"[本地资料 {index}]",
                 f"- doc_type: {hit.doc_type or 'unknown'}",
                 f"- source: {hit.source or 'unknown'}",
+                f"- parent_id: {hit.parent_id or 'unknown'}",
                 f"- retrieval_mode: {hit.retrieval_mode}",
                 hit.content,
+                f"父文档摘录：\n{parent_excerpt_text}" if parent_excerpt_text and parent_excerpt_text != hit.content.strip() else "",
                 "",
-            ]
+            ] if line]
         )
         if current_length + len(block) > settings.rag_max_context_chars:
             break
@@ -289,6 +384,80 @@ def save_manifest_record(
     )
 
 
+def save_parent_records(documents: list[Document]) -> None:
+    settings = get_settings()
+    manifest_path = Path(settings.knowledge_base_dir) / PARENT_MANIFEST_FILENAME
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    records: dict[str, dict[str, str]] = {}
+    if manifest_path.exists():
+        loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            records = loaded
+
+    grouped: dict[str, list[Document]] = {}
+    for doc in documents:
+        parent_id = _metadata_text(doc, "parent_id")
+        if not parent_id:
+            continue
+        grouped.setdefault(parent_id, []).append(doc)
+
+    for parent_id, parent_docs in grouped.items():
+        first_doc = parent_docs[0]
+        records[parent_id] = {
+            "parent_id": parent_id,
+            "source": _metadata_text(first_doc, "source") or "",
+            "original_filename": _metadata_text(first_doc, "original_filename") or "",
+            "doc_type": _metadata_text(first_doc, "doc_type") or "other",
+            "content": "\n\n".join(doc.page_content for doc in parent_docs).strip(),
+        }
+
+    manifest_path.write_text(
+        json.dumps(records, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def load_parent_records() -> dict[str, dict[str, str]]:
+    settings = get_settings()
+    manifest_path = Path(settings.knowledge_base_dir) / PARENT_MANIFEST_FILENAME
+    if not manifest_path.exists():
+        return {}
+
+    loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(loaded, dict):
+        return {}
+
+    return {
+        str(key): value
+        for key, value in loaded.items()
+        if isinstance(value, dict)
+    }
+
+
+def attach_parent_excerpts(docs: list[Document]) -> None:
+    parent_records = load_parent_records()
+    if not parent_records:
+        return
+
+    for doc in docs:
+        parent_id = _metadata_text(doc, "parent_id")
+        if not parent_id:
+            continue
+        parent_record = parent_records.get(parent_id)
+        if not parent_record:
+            continue
+        parent_content = str(parent_record.get("content") or "").strip()
+        if parent_content:
+            doc.metadata["parent_excerpt"] = _truncate_text(parent_content, PARENT_EXCERPT_CHARS)
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    return f"{text[:max_chars].rstrip()}..."
+
+
 def _metadata_text(doc: Document, key: str) -> str | None:
     value = doc.metadata.get(key)
     if value is None:
@@ -301,3 +470,17 @@ def _metadata_doc_type(doc: Document) -> DocType | None:
     if isinstance(value, str) and value in VALID_DOC_TYPES:
         return cast(DocType, value)
     return None
+
+def load_all_index_documents() -> list[Document]:
+    """加载当前向量库中所有的文档，返回一个列表"""
+    vectorstore = load_vectorstore()
+    if vectorstore is None:
+        return []
+
+    docs: list[Document] = []
+    for docstore_id in vectorstore.index_to_docstore_id.values():
+        doc = vectorstore.docstore.search(docstore_id)
+        if isinstance(doc, Document):
+            docs.append(doc)
+
+    return docs
