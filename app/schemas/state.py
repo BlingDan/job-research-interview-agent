@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Literal
 from pydantic import BaseModel, Field
 
+from app.schemas.memory import CandidateProfile, SessionMemory
 from app.schemas.task import TaskCreateRequest
 from app.schemas.report import ReportPayload, SearchResultItem
 
@@ -43,6 +44,10 @@ class ResearchState(BaseModel):
     planning: list[TodoItem] = Field(default_factory=list)
     task_summaries: list[TaskSummary] = Field(default_factory=list)
     local_context: str | None = None
+    candidate_profile: CandidateProfile | None = None
+    session_memory: SessionMemory | None = None
+    project_memory: str | None = None
+    consolidated_memory: str | None = None
     report: ReportPayload | None = None
     search_results: list[SearchResultItem] = Field(default_factory=list)
     status: str = "created"

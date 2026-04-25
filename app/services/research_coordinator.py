@@ -4,6 +4,18 @@ from pathlib import Path
 from app.core.config import get_settings
 from app.schemas.state import ResearchState
 from app.schemas.task import TaskCreateRequest
+from app.schemas.memory import CandidateProfile
+from app.services.memory_service import (
+    append_memory_events,
+    build_session_memory as build_memory_session,
+    extract_memory_events,
+    load_memory_bundle,
+    merge_candidate_profile,
+    persist_session_memory,
+    render_consolidated_memory,
+    save_candidate_profile,
+    save_consolidated_memory,
+)
 from app.services.planner_service import build_planning
 from app.services.report_service import build_report, render_report_markdown
 from app.services.search_service import run_task_search
@@ -22,10 +34,13 @@ class ResearchCoordinator:
 
     def run(self) -> ResearchState:
         try:
+            self.load_memory()
             self.plan()
             self.build_local_knowledge()
             self.execute_tasks()
+            self.build_session_memory()
             self.build_final_report()
+            self.persist_memory()
         except Exception as exc:
             self.state.status = "failed"
             self.state.error = str(exc)
@@ -34,6 +49,12 @@ class ResearchCoordinator:
             self.persist_status()
 
         return self.state
+
+    def load_memory(self) -> None:
+        memory_bundle = load_memory_bundle()
+        self.state.candidate_profile = memory_bundle.candidate_profile
+        self.state.project_memory = memory_bundle.project_memory
+        self.state.consolidated_memory = memory_bundle.consolidated_memory
 
     def plan(self) -> None:
         self.state.status = "planning"
@@ -89,6 +110,14 @@ class ResearchCoordinator:
             self.state.task_summaries.append(summary)
             self.state.search_results.extend(results)
 
+    def build_session_memory(self) -> None:
+        session_memory = build_memory_session(
+            self.state,
+            report_path=str(self.task_dir / "report.md"),
+        )
+        self.state.session_memory = session_memory
+        persist_session_memory(self.task_dir, session_memory)
+
     def build_final_report(self) -> None:
         self.state.status = "reporting"
         report = build_report(self.state)
@@ -96,6 +125,26 @@ class ResearchCoordinator:
         self._write_json("report.json", report.model_dump())
         self._write_text("report.md", render_report_markdown(report))
         self.state.status = "done"
+
+    def persist_memory(self) -> None:
+        if self.state.session_memory is None:
+            return
+
+        events = extract_memory_events(self.state, self.state.session_memory)
+        append_memory_events(events)
+
+        profile = merge_candidate_profile(
+            self.state.candidate_profile or CandidateProfile(),
+            events,
+        )
+        save_candidate_profile(profile)
+
+        project_memory = self.state.project_memory or ""
+        consolidated_memory = render_consolidated_memory(profile, project_memory)
+        save_consolidated_memory(consolidated_memory)
+
+        self.state.candidate_profile = profile
+        self.state.consolidated_memory = consolidated_memory
 
     def persist_status(self) -> None:
         self._write_json("state.json", self.state.model_dump())

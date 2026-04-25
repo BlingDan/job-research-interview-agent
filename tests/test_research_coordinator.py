@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.schemas.rag import LocalContextBundle
 from app.schemas.report import ReportPayload, ReportSection, SearchResultItem
 from app.schemas.state import TaskSummary, TodoItem
 from app.schemas.task import TaskCreateRequest
@@ -36,11 +37,13 @@ def test_merge_local_context_can_be_called_from_coordinator_instance():
 
 def test_run_executes_pipeline_and_persists_outputs(tmp_path: Path, monkeypatch) -> None:
     from app.services import research_coordinator
+    from app.services import memory_service
 
     payload = TaskCreateRequest(
         jd_text="需要 Python FastAPI Agent 能力",
         company_name="OpenAI",
         interview_topic="Agent backend",
+        user_note="我有 FastAPI + RAG 项目经验，SSE 还需要补强。",
     )
     todo = TodoItem(
         id="todo-1",
@@ -96,11 +99,25 @@ def test_run_executes_pipeline_and_persists_outputs(tmp_path: Path, monkeypatch)
         "get_settings",
         lambda: SimpleNamespace(workspace_root=str(tmp_path)),
     )
+    monkeypatch.setattr(
+        memory_service,
+        "get_settings",
+        lambda: SimpleNamespace(workspace_root=str(tmp_path)),
+    )
     monkeypatch.setattr(research_coordinator, "build_planning", lambda _: [todo])
     monkeypatch.setattr(
         research_coordinator,
         "run_task_search",
         lambda task_id, todo, payload: (results, "- [jd] 示例标题", "任务：岗位核心能力拆解"),
+    )
+    monkeypatch.setattr(
+        research_coordinator,
+        "get_local_context",
+        lambda query, doc_types=None: LocalContextBundle(
+            query=query,
+            summary="本地资料显示候选人有 FastAPI、RAG 和 Agent 项目经验。",
+            hits=[],
+        ),
     )
     monkeypatch.setattr(research_coordinator, "build_task_summary", _build_task_summary)
     monkeypatch.setattr(research_coordinator, "build_report", lambda state: report)
@@ -122,8 +139,21 @@ def test_run_executes_pipeline_and_persists_outputs(tmp_path: Path, monkeypatch)
     assert len(state.search_results) == 1
     assert json.loads((task_dir / "planning.json").read_text(encoding="utf-8"))[0]["id"] == "todo-1"
     assert json.loads((task_dir / "report.json").read_text(encoding="utf-8"))["title"] == report.title
-    assert json.loads((task_dir / "state.json").read_text(encoding="utf-8"))["status"] == "done"
+    state_json = json.loads((task_dir / "state.json").read_text(encoding="utf-8"))
+    assert state_json["status"] == "done"
+    assert state_json["session_memory"]["task_id"] == "demo-task"
     assert (task_dir / "report.md").read_text(encoding="utf-8").startswith("# 面试准备研究报告")
+    assert (task_dir / "session_memory.json").exists()
+
+    memory_dir = tmp_path / "memory"
+    profile_json = json.loads((memory_dir / "candidate_profile.json").read_text(encoding="utf-8"))
+    event_lines = (memory_dir / "memory_events.jsonl").read_text(encoding="utf-8").splitlines()
+    consolidated = (memory_dir / "consolidated_memory.md").read_text(encoding="utf-8")
+
+    assert "project_memory.md" in {path.name for path in memory_dir.iterdir()}
+    assert "FastAPI" in [skill["name"] for skill in profile_json["skills"]]
+    assert event_lines
+    assert "FastAPI" in consolidated
 
 
 def test_run_marks_state_failed_and_persists_error(tmp_path: Path, monkeypatch) -> None:

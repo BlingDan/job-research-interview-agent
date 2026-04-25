@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.schemas.memory import CandidateProfile, SkillMemory
 from app.schemas.report import ReportPayload, ReportSection
 from app.schemas.state import ResearchState, TaskSummary, TodoItem
 from app.schemas.task import TaskCreateRequest
@@ -38,6 +39,7 @@ def _make_state() -> ResearchState:
 
 def test_build_report_from_agent_json(monkeypatch) -> None:
     from app.services import report_service
+    captured = {}
 
     raw_text = """
     {
@@ -60,18 +62,28 @@ def test_build_report_from_agent_json(monkeypatch) -> None:
     }
     """
 
-    monkeypatch.setattr(
-        report_service,
-        "generate_report_text",
-        lambda planning, task_summaries, local_context_summary=None: raw_text,
-    )
+    def _generate_report_text(**kwargs):
+        captured.update(kwargs)
+        return raw_text
 
-    report = build_report(_make_state())
+    monkeypatch.setattr(report_service, "generate_report_text", _generate_report_text)
+
+    state = _make_state()
+    state.candidate_profile = CandidateProfile(
+        skills=[SkillMemory(name="FastAPI", level="project", evidence=["本地资料"], confidence=0.9)]
+    )
+    state.project_memory = "# Project Memory\n\n- 项目级记忆"
+    state.consolidated_memory = "# Consolidated Memory\n\n- FastAPI"
+
+    report = build_report(state)
 
     assert report.title == "面试准备研究报告"
     assert len(report.sections) == 2
     assert report.sections[0].title == "岗位要求拆解"
     assert report.references == ["https://example.com/jd"]
+    assert captured["candidate_profile"].skills[0].name == "FastAPI"
+    assert captured["project_memory"] == "# Project Memory\n\n- 项目级记忆"
+    assert captured["consolidated_memory"] == "# Consolidated Memory\n\n- FastAPI"
 
 
 def test_build_report_falls_back_when_agent_output_invalid(monkeypatch) -> None:
@@ -80,14 +92,25 @@ def test_build_report_falls_back_when_agent_output_invalid(monkeypatch) -> None:
     monkeypatch.setattr(
         report_service,
         "generate_report_text",
-        lambda planning, task_summaries, local_context_summary=None: "not-json",
+        lambda **kwargs: "not-json",
     )
 
-    report = build_report(_make_state())
+    state = _make_state()
+    state.candidate_profile = CandidateProfile(
+        skills=[SkillMemory(name="FastAPI", level="project", evidence=["本地资料"], confidence=0.9)],
+        target_roles=["AI 应用后端"],
+    )
+    state.consolidated_memory = "# Consolidated Memory\n\n- 当前弱项：SSE 真实任务流"
+
+    report = build_report(state)
 
     assert report.title == "面试准备研究报告"
     assert report.sections[0].title == "岗位核心能力拆解"
     assert "https://example.com/jd" in report.references
+    assert any(section.title == "候选人长期画像与项目匹配" for section in report.sections)
+    matching_section = next(section for section in report.sections if section.title == "候选人长期画像与项目匹配")
+    assert any("FastAPI" in bullet for bullet in matching_section.bullets)
+    assert any("AI 应用后端" in bullet for bullet in matching_section.bullets)
 
 
 def test_render_report_markdown_renders_sections_and_references() -> None:
