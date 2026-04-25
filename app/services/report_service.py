@@ -14,6 +14,9 @@ def build_report(state: ResearchState) -> ReportPayload:
             planning=state.planning,
             task_summaries=state.task_summaries,
             local_context_summary=state.local_context,
+            candidate_profile=state.candidate_profile,
+            project_memory=state.project_memory,
+            consolidated_memory=state.consolidated_memory,
         )
         return parse_report_output(raw_text)
     except Exception:
@@ -93,6 +96,10 @@ def build_fallback_report(state: ResearchState) -> ReportPayload:
             )
         )
 
+    memory_section = build_memory_matching_section(state)
+    if memory_section is not None:
+        sections.append(memory_section)
+
     next_actions = [
         "补充更细的岗位技术映射",
         "补充本地资料与候选人项目经验对应关系",
@@ -105,6 +112,53 @@ def build_fallback_report(state: ResearchState) -> ReportPayload:
         sections=sections,
         next_actions=next_actions,
         references=references,
+    )
+
+
+def build_memory_matching_section(state: ResearchState) -> ReportSection | None:
+    profile = state.candidate_profile
+    if profile is None:
+        return None
+
+    bullets: list[str] = []
+    sources: list[str] = []
+
+    if profile.skills:
+        bullets.append(
+            "候选人长期技能画像：" + "、".join(skill.name for skill in profile.skills[:8])
+        )
+        sources.extend(
+            evidence
+            for skill in profile.skills
+            for evidence in skill.evidence[:2]
+        )
+
+    if profile.projects:
+        bullets.append(
+            "可重点讲解的项目经验：" + "、".join(project.name for project in profile.projects[:5])
+        )
+        sources.extend(
+            evidence
+            for project in profile.projects
+            for evidence in project.evidence[:2]
+        )
+
+    if profile.target_roles:
+        bullets.append("目标岗位方向：" + "、".join(profile.target_roles[:5]))
+
+    active_weak_points = [
+        item.name for item in profile.weak_points if item.status == "active"
+    ]
+    if active_weak_points:
+        bullets.append("需要补齐的候选人弱项：" + "、".join(active_weak_points[:5]))
+
+    if not bullets:
+        return None
+
+    return ReportSection(
+        title="候选人长期画像与项目匹配",
+        bullets=bullets,
+        sources=sorted(set(sources)),
     )
 
 
