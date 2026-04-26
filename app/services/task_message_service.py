@@ -25,7 +25,7 @@ class TaskMessageService:
             command_type = "health"
         elif normalized == "确认":
             command_type = "confirm"
-        elif normalized in {"现在做到哪了？", "现在做到哪了?", "进度", "状态"}:
+        elif normalized in {"现在做到哪了？", "现在做到哪了?", "进度", "当前进度", "状态"}:
             command_type = "progress"
         elif normalized.startswith(("修改：", "修改:")):
             command_type = "revise"

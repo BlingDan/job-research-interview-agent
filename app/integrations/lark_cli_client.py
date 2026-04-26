@@ -35,8 +35,10 @@ class LarkCliClient:
                 "bot",
                 "--chat-id",
                 chat_id,
-                "--text",
-                text,
+                "--msg-type",
+                "text",
+                "--content",
+                _text_content(text),
             ]
         )
 
@@ -49,8 +51,10 @@ class LarkCliClient:
                 "bot",
                 "--message-id",
                 message_id,
-                "--text",
-                text,
+                "--msg-type",
+                "text",
+                "--content",
+                _text_content(text),
             ]
         )
 
@@ -208,6 +212,10 @@ def _escape_xml(value: str) -> str:
         .replace(">", "&gt;")
         .replace('"', "&quot;")
     )
+
+
+def _text_content(text: str) -> str:
+    return json.dumps({"text": text}, ensure_ascii=False)
 
 
 def build_lark_cli_command(

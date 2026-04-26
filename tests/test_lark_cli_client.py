@@ -1,5 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
+import json
 
 from app.integrations.lark_cli_client import LarkCliClient
 
@@ -23,7 +24,9 @@ def test_send_message_builds_lark_cli_command(monkeypatch):
     assert result["data"]["message_id"] == "om_1"
     assert calls[0][:4] == ["lark-cli", "im", "+messages-send", "--as"]
     assert "--chat-id" in calls[0]
-    assert "--text" in calls[0]
+    assert "--content" in calls[0]
+    assert "--msg-type" in calls[0]
+    assert "--text" not in calls[0]
     assert "--markdown" not in calls[0]
     assert "--dry-run" in calls[0]
 
@@ -46,8 +49,31 @@ def test_reply_message_builds_lark_cli_command(monkeypatch):
 
     assert "+messages-reply" in calls[0]
     assert "--message-id" in calls[0]
-    assert "--text" in calls[0]
+    assert "--content" in calls[0]
+    assert "--msg-type" in calls[0]
+    assert "--text" not in calls[0]
     assert "--markdown" not in calls[0]
+
+
+def test_reply_message_encodes_multiline_text_as_single_line_json(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.integrations.lark_cli_client._resolve_lark_cli_prefix",
+        lambda executable: ["lark-cli"],
+    )
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr("app.integrations.lark_cli_client.subprocess.run", fake_run)
+    client = LarkCliClient(dry_run=True)
+
+    client.reply_message("om_demo", "line1\nline2")
+
+    content = calls[0][calls[0].index("--content") + 1]
+    assert "\n" not in content
+    assert json.loads(content) == {"text": "line1\nline2"}
 
 
 def test_create_doc_builds_v2_docs_command(tmp_path, monkeypatch):

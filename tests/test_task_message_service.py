@@ -14,6 +14,12 @@ def test_parse_progress_query():
     assert command.type == "progress"
 
 
+def test_parse_current_progress_query():
+    command = TaskMessageService().parse_text("当前进度")
+
+    assert command.type == "progress"
+
+
 def test_parse_revision():
     command = TaskMessageService().parse_text("修改：PPT 更突出工程实现")
 
