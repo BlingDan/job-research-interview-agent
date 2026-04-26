@@ -18,7 +18,13 @@ require Feishu credentials.
 
 import json
 import subprocess
+import sys
+from pathlib import Path
 from typing import TextIO
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.api.routers.task import build_orchestrator
 from app.services.orchestrator import AgentPilotOrchestrator
@@ -46,6 +52,10 @@ def consume_events(stream: TextIO, orchestrator: AgentPilotOrchestrator) -> None
 
 
 def main() -> None:
+    if "--check-imports" in sys.argv:
+        print("ok")
+        return
+
     process = subprocess.Popen(
         ["lark-cli", "event", "+subscribe", "--compact"],
         stdout=subprocess.PIPE,

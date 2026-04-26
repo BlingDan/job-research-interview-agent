@@ -4,6 +4,8 @@ from app.services.orchestrator import AgentPilotOrchestrator
 from app.services.state_service import StateService
 from app.services.task_message_service import TaskMessageService
 from scripts.lark_event_listener import handle_event_line
+import subprocess
+import sys
 
 
 def test_handle_event_line_routes_event(tmp_path):
@@ -30,3 +32,15 @@ def test_handle_event_line_routes_followup_confirm(tmp_path):
     assert response.task_id == created.task_id
     assert response.status == "DONE"
 
+
+def test_listener_script_can_be_executed_by_path():
+    completed = subprocess.run(
+        [sys.executable, "scripts/lark_event_listener.py", "--check-imports"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout.strip() == "ok"
