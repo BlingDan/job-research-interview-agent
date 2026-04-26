@@ -69,3 +69,5 @@ pyrightconfig.json
 
 # Other
 */superpowers/
+!docs/superpowers/
+!docs/superpowers/**

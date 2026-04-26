@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     search_depth: Literal["basic", "advanced", "fast", "ultra-fast"] = "basic"  
 
     workspace_root: str = "workspace"
+    lark_mode: Literal["fake", "dry_run", "real"] = "fake"
+    lark_cli_timeout_seconds: float = 30.0
+    agent_pilot_default_chat_id: str | None = None
     
     model_config = SettingsConfigDict(
         env_file=".env",
