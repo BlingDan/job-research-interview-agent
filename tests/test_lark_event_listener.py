@@ -41,7 +41,7 @@ def test_handle_event_line_replies_to_ping_without_creating_task(tmp_path):
     response = handle_event_line(line, orchestrator, TaskMessageService())
 
     assert response is None
-    assert lark_client.sent_messages[-1]["message_id"] == "om_demo"
+    assert lark_client.sent_messages[-1]["reply_to_message_id"] == "om_demo"
     assert "在线" in lark_client.sent_messages[-1]["text"]
     assert not (tmp_path / "indexes" / "chat_tasks.json").exists()
 

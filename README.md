@@ -137,10 +137,13 @@ For real Feishu Bot replies while keeping Doc/Slides/Canvas stable in fake mode:
 ```powershell
 $env:LARK_IM_MODE="real"
 $env:LARK_ARTIFACT_MODE="fake"
+$env:LARK_STREAM_DELAY_SECONDS="0.2"
 uv run python scripts/lark_event_listener.py
 ```
 
 The listener consumes `lark-cli event +subscribe --compact`, parses IM messages, and routes them into the same Agent-Pilot orchestrator used by `/tasks`.
+
+Plan replies are streamed by sending one Bot message and then updating that same message with `PATCH /open-apis/im/v1/messages/{message_id}`. If Feishu returns a permission error, enable the Bot message update permission in the developer console or set `LARK_STREAM_DELAY_SECONDS="0"` and rely on the final fallback reply.
 
 ## Important Commands
 

@@ -13,6 +13,9 @@ class LarkClient(Protocol):
     def reply_message(self, message_id: str, text: str) -> dict:
         ...
 
+    def update_message(self, message_id: str, text: str) -> dict:
+        ...
+
     def create_doc(
         self, task_id: str, title: str, content: str, task_dir: Path
     ) -> ArtifactRef:
@@ -27,4 +30,3 @@ class LarkClient(Protocol):
         self, task_id: str, title: str, mermaid: str, task_dir: Path
     ) -> ArtifactRef:
         ...
-

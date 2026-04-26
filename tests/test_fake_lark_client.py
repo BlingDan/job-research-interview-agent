@@ -20,9 +20,13 @@ def test_fake_client_writes_artifacts(tmp_path):
 def test_fake_client_records_messages():
     client = FakeLarkClient()
 
-    client.send_message("oc_demo", "hello")
-    client.reply_message("om_demo", "world")
+    sent = client.send_message("oc_demo", "hello")
+    replied = client.reply_message("om_demo", "world")
+    client.update_message(replied["message_id"], "updated")
 
     assert client.sent_messages[0]["chat_id"] == "oc_demo"
-    assert client.sent_messages[1]["message_id"] == "om_demo"
-
+    assert client.sent_messages[1]["reply_to_message_id"] == "om_demo"
+    assert sent["message_id"].startswith("om_fake_")
+    assert replied["message_id"].startswith("om_fake_")
+    assert client.sent_messages[2]["updated_message_id"] == replied["message_id"]
+    assert client.sent_messages[2]["text"] == "updated"

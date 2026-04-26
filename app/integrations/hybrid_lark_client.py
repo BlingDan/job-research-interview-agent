@@ -17,6 +17,9 @@ class HybridLarkClient:
     def reply_message(self, message_id: str, text: str) -> dict:
         return self.im_client.reply_message(message_id, text)
 
+    def update_message(self, message_id: str, text: str) -> dict:
+        return self.im_client.update_message(message_id, text)
+
     def create_doc(
         self, task_id: str, title: str, content: str, task_dir: Path
     ) -> ArtifactRef:
@@ -31,4 +34,3 @@ class HybridLarkClient:
         self, task_id: str, title: str, mermaid: str, task_dir: Path
     ) -> ArtifactRef:
         return self.artifact_client.create_canvas(task_id, title, mermaid, task_dir)
-

@@ -33,7 +33,11 @@ def build_orchestrator() -> AgentPilotOrchestrator:
             im_client=im_client,
             artifact_client=artifact_client,
         )
-    return AgentPilotOrchestrator(state_service, lark_client)
+    return AgentPilotOrchestrator(
+        state_service,
+        lark_client,
+        stream_delay_seconds=getattr(settings, "lark_stream_delay_seconds", 0.0),
+    )
 
 
 def _build_lark_client(mode: str, timeout_seconds: float) -> LarkClient:

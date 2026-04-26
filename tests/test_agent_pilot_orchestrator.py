@@ -9,7 +9,8 @@ def _orchestrator(tmp_path):
 
 
 def test_create_task_waits_for_confirmation(tmp_path):
-    orchestrator = _orchestrator(tmp_path)
+    lark_client = FakeLarkClient()
+    orchestrator = AgentPilotOrchestrator(StateService(tmp_path), lark_client)
 
     response = orchestrator.create_task(
         TaskCreateRequest(message="@Agent 生成参赛方案", chat_id="oc_demo", message_id="om_demo")
@@ -18,6 +19,9 @@ def test_create_task_waits_for_confirmation(tmp_path):
     assert response.status == "WAITING_CONFIRMATION"
     assert response.plan is not None
     assert "确认" in response.reply
+    assert lark_client.sent_messages[0]["text"] == "已理解需求，正在拆解执行计划..."
+    assert lark_client.sent_messages[-1]["type"] == "update"
+    assert lark_client.sent_messages[-1]["text"] == response.reply
 
 
 def test_confirm_generates_three_artifacts(tmp_path):
@@ -41,4 +45,3 @@ def test_revise_records_revision(tmp_path):
     assert revised.status == "DONE"
     assert revised.revisions[0].target_artifacts == ["slides"]
     assert "已处理修改" in revised.reply
-

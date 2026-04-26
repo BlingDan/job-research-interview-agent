@@ -76,6 +76,29 @@ def test_reply_message_encodes_multiline_text_as_single_line_json(monkeypatch):
     assert json.loads(content) == {"text": "line1\nline2"}
 
 
+def test_update_message_uses_patch_api(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.integrations.lark_cli_client._resolve_lark_cli_prefix",
+        lambda executable: ["lark-cli"],
+    )
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr("app.integrations.lark_cli_client.subprocess.run", fake_run)
+    client = LarkCliClient(dry_run=True)
+
+    client.update_message("om_bot", "line1\nline2")
+
+    assert calls[0][1:4] == ["api", "PATCH", "/open-apis/im/v1/messages/om_bot"]
+    assert "--as" in calls[0]
+    assert "bot" in calls[0]
+    content = calls[0][calls[0].index("--data") + 1]
+    assert json.loads(json.loads(content)["content"]) == {"text": "line1\nline2"}
+
+
 def test_create_doc_builds_v2_docs_command(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(

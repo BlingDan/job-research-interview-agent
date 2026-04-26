@@ -10,7 +10,9 @@ def test_hybrid_lark_client_routes_im_and_artifacts(tmp_path):
     client = HybridLarkClient(im_client=im_client, artifact_client=artifact_client)
 
     client.send_message("oc_demo", "hello")
+    client.update_message("om_bot", "updated")
     artifact = client.create_doc("task-1", "方案", "# 方案", Path(tmp_path))
 
     assert im_client.sent_messages[0]["chat_id"] == "oc_demo"
+    assert im_client.sent_messages[1]["updated_message_id"] == "om_bot"
     assert artifact.url == "https://fake-artifact.local/doc/task-1"

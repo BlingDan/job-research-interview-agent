@@ -2,6 +2,7 @@ from app.agents.planner_agent import build_fallback_plan
 from app.schemas.agent_pilot import AgentPilotTask, ArtifactRef, RevisionRecord
 from app.services.delivery_service import (
     format_final_reply,
+    format_plan_reply_chunks,
     format_plan_reply,
     format_progress_reply,
     format_revision_reply,
@@ -15,6 +16,16 @@ def test_plan_reply_includes_confirmation():
 
     assert "确认" in reply
     assert "生成参赛方案文档" in reply
+
+
+def test_plan_reply_chunks_are_cumulative():
+    task = AgentPilotTask(task_id="task-1", input_text="生成方案", plan=build_fallback_plan("生成方案"))
+
+    chunks = format_plan_reply_chunks(task)
+
+    assert chunks[0] == "已理解需求，正在拆解执行计划..."
+    assert "1. 意图捕捉与任务规划" in chunks[1]
+    assert chunks[-1] == format_plan_reply(task)
 
 
 def test_progress_reply_includes_status_and_next_action():
@@ -58,4 +69,3 @@ def test_revision_reply_mentions_targets():
 
     assert "slides" in reply
     assert "PPT" in reply
-

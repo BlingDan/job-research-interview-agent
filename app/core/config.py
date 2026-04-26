@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     lark_im_mode: Literal["fake", "dry_run", "real"] | None = None
     lark_artifact_mode: Literal["fake", "dry_run", "real"] | None = None
     lark_cli_timeout_seconds: float = 30.0
+    lark_stream_delay_seconds: float = 0.0
     agent_pilot_default_chat_id: str | None = None
     
     model_config = SettingsConfigDict(

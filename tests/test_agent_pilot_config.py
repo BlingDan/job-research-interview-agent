@@ -7,5 +7,6 @@ def test_agent_pilot_config_defaults():
     assert settings.lark_mode == "fake"
     assert settings.lark_im_mode is None
     assert settings.lark_artifact_mode is None
+    assert settings.lark_stream_delay_seconds == 0.0
     assert settings.agent_pilot_default_chat_id is None
     assert settings.workspace_root == "workspace"

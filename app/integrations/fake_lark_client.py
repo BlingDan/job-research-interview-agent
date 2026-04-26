@@ -10,16 +10,36 @@ class FakeLarkClient:
     def __init__(self, base_url: str = "https://fake.feishu.local"):
         self.base_url = base_url.rstrip("/")
         self.sent_messages: list[dict] = []
+        self._message_counter = 0
 
     def send_message(self, chat_id: str, text: str) -> dict:
-        payload = {"mode": "fake", "chat_id": chat_id, "text": text}
+        payload = {"mode": "fake", "chat_id": chat_id, "text": text, "message_id": self._next_message_id()}
         self.sent_messages.append(payload)
         return payload
 
     def reply_message(self, message_id: str, text: str) -> dict:
-        payload = {"mode": "fake", "message_id": message_id, "text": text}
+        payload = {
+            "mode": "fake",
+            "message_id": self._next_message_id(),
+            "reply_to_message_id": message_id,
+            "text": text,
+        }
         self.sent_messages.append(payload)
         return payload
+
+    def update_message(self, message_id: str, text: str) -> dict:
+        payload = {
+            "mode": "fake",
+            "type": "update",
+            "updated_message_id": message_id,
+            "text": text,
+        }
+        self.sent_messages.append(payload)
+        return payload
+
+    def _next_message_id(self) -> str:
+        self._message_counter += 1
+        return f"om_fake_{self._message_counter}"
 
     def create_doc(
         self, task_id: str, title: str, content: str, task_dir: Path
@@ -74,4 +94,3 @@ class FakeLarkClient:
             status="fake",
             summary="已生成 Agent 编排架构画板。",
         )
-

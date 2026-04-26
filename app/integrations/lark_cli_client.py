@@ -58,6 +58,25 @@ class LarkCliClient:
             ]
         )
 
+    def update_message(self, message_id: str, text: str) -> dict:
+        return self._run(
+            [
+                "api",
+                "PATCH",
+                f"/open-apis/im/v1/messages/{message_id}",
+                "--data",
+                json.dumps(
+                    {
+                        "msg_type": "text",
+                        "content": _text_content(text),
+                    },
+                    ensure_ascii=False,
+                ),
+                "--as",
+                "bot",
+            ]
+        )
+
     def create_doc(
         self, task_id: str, title: str, content: str, task_dir: Path
     ) -> ArtifactRef:

@@ -90,6 +90,7 @@ Recommended stable competition mode:
 ```powershell
 $env:LARK_IM_MODE="real"
 $env:LARK_ARTIFACT_MODE="fake"
+$env:LARK_STREAM_DELAY_SECONDS="0.2"
 uv run python scripts/lark_event_listener.py
 ```
 
@@ -127,3 +128,4 @@ If real Feishu Docs, Slides, or Whiteboard permissions are blocked:
 - Responses include realistic artifact URLs.
 - Switching all surfaces to real Feishu requires `LARK_MODE=real` and the necessary `lark-cli` scopes.
 - Keeping only IM real requires `LARK_IM_MODE=real` and `LARK_ARTIFACT_MODE=fake`.
+- Streaming plan replies update the Bot's own IM message with `PATCH /open-apis/im/v1/messages/{message_id}`. If this fails, add the app permission for updating Bot messages, then restart the listener.

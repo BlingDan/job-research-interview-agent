@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 import uuid
 
 from app.agents.canvas_agent import build_canvas_artifact
@@ -18,6 +19,7 @@ from app.schemas.agent_pilot import (
 from app.services.delivery_service import (
     format_error_reply,
     format_final_reply,
+    format_plan_reply_chunks,
     format_plan_reply,
     format_progress_reply,
     format_revision_reply,
@@ -26,9 +28,16 @@ from app.services.state_service import StateService
 
 
 class AgentPilotOrchestrator:
-    def __init__(self, state_service: StateService, lark_client: LarkClient):
+    def __init__(
+        self,
+        state_service: StateService,
+        lark_client: LarkClient,
+        *,
+        stream_delay_seconds: float = 0.0,
+    ):
         self.state_service = state_service
         self.lark_client = lark_client
+        self.stream_delay_seconds = max(stream_delay_seconds, 0.0)
 
     def create_task(self, request: TaskCreateRequest) -> AgentPilotResponse:
         task = AgentPilotTask(
@@ -44,7 +53,7 @@ class AgentPilotOrchestrator:
             task.plan = build_agent_plan(request.message)
             self.state_service.update_status(task, "WAITING_CONFIRMATION")
             reply = format_plan_reply(task)
-            self._send_or_reply(task, reply)
+            self._send_or_reply_stream(task, format_plan_reply_chunks(task), reply)
             return self._response(task, reply)
         except Exception as exc:
             task.error = str(exc)
@@ -224,6 +233,32 @@ class AgentPilotOrchestrator:
         elif task.chat_id:
             self.lark_client.send_message(task.chat_id, text)
 
+    def _send_or_reply_stream(self, task: AgentPilotTask, chunks: list[str], final_text: str) -> None:
+        if len(chunks) < 2:
+            self._send_or_reply(task, final_text)
+            return
+
+        result = self._send_or_reply_result(task, chunks[0])
+        stream_message_id = _message_id_from_result(result)
+        if not stream_message_id:
+            self._send_or_reply(task, final_text)
+            return
+
+        try:
+            for chunk in chunks[1:]:
+                if self.stream_delay_seconds:
+                    time.sleep(self.stream_delay_seconds)
+                self.lark_client.update_message(stream_message_id, chunk)
+        except Exception:
+            self._send_or_reply(task, final_text)
+
+    def _send_or_reply_result(self, task: AgentPilotTask, text: str) -> dict:
+        if task.message_id:
+            return self.lark_client.reply_message(task.message_id, text)
+        if task.chat_id:
+            return self.lark_client.send_message(task.chat_id, text)
+        return {}
+
     def _response(self, task: AgentPilotTask, reply: str) -> AgentPilotResponse:
         return AgentPilotResponse(
             task_id=task.task_id,
@@ -234,3 +269,17 @@ class AgentPilotOrchestrator:
             reply=reply,
             error=task.error,
         )
+
+
+def _message_id_from_result(result: dict) -> str | None:
+    message_id = result.get("message_id")
+    if isinstance(message_id, str) and message_id:
+        return message_id
+
+    data = result.get("data")
+    if isinstance(data, dict):
+        message_id = data.get("message_id")
+        if isinstance(message_id, str) and message_id:
+            return message_id
+
+    return None
