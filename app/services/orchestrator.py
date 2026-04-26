@@ -238,7 +238,12 @@ class AgentPilotOrchestrator:
             self._send_or_reply(task, final_text)
             return
 
-        result = self._send_or_reply_card_result(task, chunks[0])
+        try:
+            result = self._send_or_reply_card_result(task, chunks[0])
+        except Exception:
+            self._send_or_reply(task, final_text)
+            return
+
         stream_message_id = _message_id_from_result(result)
         if not stream_message_id:
             self._send_or_reply(task, final_text)

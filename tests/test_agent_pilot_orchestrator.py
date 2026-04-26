@@ -25,6 +25,23 @@ def test_create_task_waits_for_confirmation(tmp_path):
     assert lark_client.sent_messages[-1]["text"] == response.reply
 
 
+def test_create_task_falls_back_to_text_when_stream_card_fails(tmp_path):
+    class NoCardFakeClient(FakeLarkClient):
+        def reply_interactive_card(self, message_id: str, text: str) -> dict:
+            raise RuntimeError("missing card permission")
+
+    lark_client = NoCardFakeClient()
+    orchestrator = AgentPilotOrchestrator(StateService(tmp_path), lark_client)
+
+    response = orchestrator.create_task(
+        TaskCreateRequest(message="@Agent 生成参赛方案", chat_id="oc_demo", message_id="om_demo")
+    )
+
+    assert response.status == "WAITING_CONFIRMATION"
+    assert lark_client.sent_messages[-1]["reply_to_message_id"] == "om_demo"
+    assert lark_client.sent_messages[-1]["text"] == response.reply
+
+
 def test_confirm_generates_three_artifacts(tmp_path):
     orchestrator = _orchestrator(tmp_path)
     created = orchestrator.create_task(TaskCreateRequest(message="生成参赛方案", chat_id="oc_demo"))
