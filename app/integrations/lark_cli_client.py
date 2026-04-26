@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -132,7 +134,7 @@ class LarkCliClient:
         )
 
     def _run(self, args: list[str]) -> dict:
-        command = [self.executable, *args]
+        command = build_lark_cli_command(args, executable=self.executable)
         if self.dry_run and "--dry-run" not in command:
             command.append("--dry-run")
 
@@ -207,3 +209,47 @@ def _escape_xml(value: str) -> str:
         .replace('"', "&quot;")
     )
 
+
+def build_lark_cli_command(
+    args: list[str], *, executable: str = "lark-cli"
+) -> list[str]:
+    return [*_resolve_lark_cli_prefix(executable), *args]
+
+
+def _resolve_lark_cli_prefix(executable: str) -> list[str]:
+    found = shutil.which(executable)
+    if found:
+        return _command_prefix_from_path(found)
+
+    if os.name == "nt":
+        completed = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-Command",
+                f"(Get-Command {executable} -ErrorAction Stop).Source",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=10,
+            check=False,
+        )
+        source = completed.stdout.strip()
+        if completed.returncode == 0 and source:
+            return _command_prefix_from_path(source)
+
+    return [executable]
+
+
+def _command_prefix_from_path(path: str) -> list[str]:
+    if path.lower().endswith(".ps1"):
+        return [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            path,
+        ]
+    return [path]
