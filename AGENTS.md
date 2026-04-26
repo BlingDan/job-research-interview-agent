@@ -1,5 +1,26 @@
 # AGENTS.md
 
+## MCP Code Search Tooling
+
+Use `mcp__ace_tool__search_context` as the primary semantic code search tool.
+The display name may appear as `ace-tool`, but the callable MCP namespace uses
+underscores, not hyphens. Do not call `mcp__ace-tool__search_context`.
+
+Use `mcp__fast_context__fast_context_search` only as a fallback when ace-tool
+cannot satisfy the semantic search request. The display name may appear as
+`fast-context`, but the callable MCP namespace is `fast_context`.
+
+Recommended project path format on Windows:
+
+```text
+E:/codespace/job-research-interview-agent
+```
+
+If ace-tool returns an indexing error such as `all files failed to upload` or
+`所有文件上传失败`, do not retry the same call repeatedly. Try fast-context if
+`WINDSURF_API_KEY` is configured; otherwise fall back to local file search such
+as `rg` or PowerShell `Select-String`.
+
 ## North Star
 
 This repository is being rebuilt for the Feishu/Lark competition. Every product,
