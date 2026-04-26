@@ -63,6 +63,7 @@ The project uses a mixed integration strategy:
 - `fake`: default mode for tests and local demos; writes local artifacts and returns realistic fake URLs.
 - `dry_run`: builds real `lark-cli` commands with `--dry-run`.
 - `real`: calls `lark-cli` without `--dry-run` when Feishu permissions are ready.
+- `LARK_IM_MODE` and `LARK_ARTIFACT_MODE` can split IM from artifact behavior. This is the safest competition mode for real Bot verification.
 
 ## Quick Start
 
@@ -131,6 +132,14 @@ Run local IM event bridge:
 uv run python scripts/lark_event_listener.py
 ```
 
+For real Feishu Bot replies while keeping Doc/Slides/Canvas stable in fake mode:
+
+```powershell
+$env:LARK_IM_MODE="real"
+$env:LARK_ARTIFACT_MODE="fake"
+uv run python scripts/lark_event_listener.py
+```
+
 The listener consumes `lark-cli event +subscribe --compact`, parses IM messages, and routes them into the same Agent-Pilot orchestrator used by `/tasks`.
 
 ## Important Commands
@@ -153,4 +162,3 @@ lark-cli event +subscribe --help
 - Feishu is the UI. Do not build a custom dashboard or mobile/desktop client.
 - Fake/dry-run mode is intentional and keeps demos reliable when Doc, Slides, or Whiteboard permissions are blocked.
 - The old job-research workflow remains in some legacy modules for now, but `/tasks` is now Agent-Pilot.
-

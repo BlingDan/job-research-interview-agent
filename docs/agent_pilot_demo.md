@@ -16,7 +16,12 @@ Check Feishu CLI status:
 lark-cli doctor --offline
 ```
 
-If user authorization is missing, keep `LARK_MODE=fake` or `LARK_MODE=dry_run`.
+If user authorization is missing, keep artifact generation fake:
+
+```powershell
+$env:LARK_IM_MODE="real"
+$env:LARK_ARTIFACT_MODE="fake"
+```
 
 ## 2. Start API
 
@@ -80,6 +85,14 @@ Run:
 uv run python scripts/lark_event_listener.py
 ```
 
+Recommended stable competition mode:
+
+```powershell
+$env:LARK_IM_MODE="real"
+$env:LARK_ARTIFACT_MODE="fake"
+uv run python scripts/lark_event_listener.py
+```
+
 In Feishu IM, send:
 
 ```text
@@ -112,5 +125,5 @@ If real Feishu Docs, Slides, or Whiteboard permissions are blocked:
 - The same `LarkClient` interface remains active.
 - `FakeLarkClient` writes `doc.md`, `slides.json`, and `canvas.mmd`.
 - Responses include realistic artifact URLs.
-- Switching to real Feishu only requires `LARK_MODE=real` and the necessary `lark-cli` scopes.
-
+- Switching all surfaces to real Feishu requires `LARK_MODE=real` and the necessary `lark-cli` scopes.
+- Keeping only IM real requires `LARK_IM_MODE=real` and `LARK_ARTIFACT_MODE=fake`.

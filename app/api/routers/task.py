@@ -2,7 +2,9 @@ from fastapi import APIRouter, HTTPException
 
 from app.core.config import get_settings
 from app.integrations.fake_lark_client import FakeLarkClient
+from app.integrations.hybrid_lark_client import HybridLarkClient
 from app.integrations.lark_cli_client import LarkCliClient
+from app.integrations.lark_client import LarkClient
 from app.schemas.agent_pilot import (
     AgentPilotResponse,
     TaskActionRequest,
@@ -18,19 +20,28 @@ router = APIRouter(tags=["tasks"])
 def build_orchestrator() -> AgentPilotOrchestrator:
     settings = get_settings()
     state_service = StateService(settings.workspace_root)
-    if settings.lark_mode == "real":
-        lark_client = LarkCliClient(
-            dry_run=False,
-            timeout_seconds=settings.lark_cli_timeout_seconds,
-        )
-    elif settings.lark_mode == "dry_run":
-        lark_client = LarkCliClient(
-            dry_run=True,
-            timeout_seconds=settings.lark_cli_timeout_seconds,
-        )
+    im_mode = settings.lark_im_mode or settings.lark_mode
+    artifact_mode = settings.lark_artifact_mode or settings.lark_mode
+    im_client = _build_lark_client(im_mode, settings.lark_cli_timeout_seconds)
+    artifact_client = _build_lark_client(
+        artifact_mode, settings.lark_cli_timeout_seconds
+    )
+    if im_mode == artifact_mode:
+        lark_client = im_client
     else:
-        lark_client = FakeLarkClient()
+        lark_client = HybridLarkClient(
+            im_client=im_client,
+            artifact_client=artifact_client,
+        )
     return AgentPilotOrchestrator(state_service, lark_client)
+
+
+def _build_lark_client(mode: str, timeout_seconds: float) -> LarkClient:
+    if mode == "real":
+        return LarkCliClient(dry_run=False, timeout_seconds=timeout_seconds)
+    if mode == "dry_run":
+        return LarkCliClient(dry_run=True, timeout_seconds=timeout_seconds)
+    return FakeLarkClient()
 
 
 @router.post("/tasks", response_model=AgentPilotResponse)

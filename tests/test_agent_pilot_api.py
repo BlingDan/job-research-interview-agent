@@ -2,6 +2,8 @@ from fastapi.testclient import TestClient
 
 from app.api.routers import task as task_router
 from app.integrations.fake_lark_client import FakeLarkClient
+from app.integrations.hybrid_lark_client import HybridLarkClient
+from app.integrations.lark_cli_client import LarkCliClient
 from app.main import app
 from app.services.orchestrator import AgentPilotOrchestrator
 from app.services.state_service import StateService
@@ -43,3 +45,24 @@ def test_agent_pilot_task_api_flow(tmp_path, monkeypatch):
     assert fetched.status_code == 200
     assert fetched.json()["task_id"] == task_id
 
+
+def test_build_orchestrator_can_split_im_and_artifact_modes(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        task_router,
+        "get_settings",
+        lambda: SimpleNamespace(
+            workspace_root=str(tmp_path),
+            lark_mode="fake",
+            lark_im_mode="real",
+            lark_artifact_mode="fake",
+            lark_cli_timeout_seconds=3.0,
+        ),
+    )
+
+    orchestrator = task_router.build_orchestrator()
+
+    assert isinstance(orchestrator.lark_client, HybridLarkClient)
+    assert isinstance(orchestrator.lark_client.im_client, LarkCliClient)
+    assert isinstance(orchestrator.lark_client.artifact_client, FakeLarkClient)

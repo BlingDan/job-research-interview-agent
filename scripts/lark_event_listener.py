@@ -5,6 +5,12 @@ Run the Feishu IM demo bridge:
 
     uv run python scripts/lark_event_listener.py
 
+For stable real-Bot verification without Doc/Slides user authorization:
+
+    $env:LARK_IM_MODE="real"
+    $env:LARK_ARTIFACT_MODE="fake"
+    uv run python scripts/lark_event_listener.py
+
 The script subscribes to lark-cli event NDJSON and routes IM messages into the
 Agent-Pilot orchestrator. Tests call `handle_event_line` directly and do not
 require Feishu credentials.
@@ -54,4 +60,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

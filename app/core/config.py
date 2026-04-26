@@ -19,6 +19,8 @@ class Settings(BaseSettings):
 
     workspace_root: str = "workspace"
     lark_mode: Literal["fake", "dry_run", "real"] = "fake"
+    lark_im_mode: Literal["fake", "dry_run", "real"] | None = None
+    lark_artifact_mode: Literal["fake", "dry_run", "real"] | None = None
     lark_cli_timeout_seconds: float = 30.0
     agent_pilot_default_chat_id: str | None = None
     
