@@ -23,6 +23,8 @@ def test_send_message_builds_lark_cli_command(monkeypatch):
     assert result["data"]["message_id"] == "om_1"
     assert calls[0][:4] == ["lark-cli", "im", "+messages-send", "--as"]
     assert "--chat-id" in calls[0]
+    assert "--text" in calls[0]
+    assert "--markdown" not in calls[0]
     assert "--dry-run" in calls[0]
 
 
@@ -44,6 +46,8 @@ def test_reply_message_builds_lark_cli_command(monkeypatch):
 
     assert "+messages-reply" in calls[0]
     assert "--message-id" in calls[0]
+    assert "--text" in calls[0]
+    assert "--markdown" not in calls[0]
 
 
 def test_create_doc_builds_v2_docs_command(tmp_path, monkeypatch):

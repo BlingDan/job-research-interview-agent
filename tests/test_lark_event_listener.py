@@ -33,6 +33,19 @@ def test_handle_event_line_routes_followup_confirm(tmp_path):
     assert response.status == "DONE"
 
 
+def test_handle_event_line_replies_to_ping_without_creating_task(tmp_path):
+    lark_client = FakeLarkClient()
+    orchestrator = AgentPilotOrchestrator(StateService(tmp_path), lark_client)
+    line = '{"text":"ping","chat_id":"oc_demo","message_id":"om_demo"}'
+
+    response = handle_event_line(line, orchestrator, TaskMessageService())
+
+    assert response is None
+    assert lark_client.sent_messages[-1]["message_id"] == "om_demo"
+    assert "在线" in lark_client.sent_messages[-1]["text"]
+    assert not (tmp_path / "indexes" / "chat_tasks.json").exists()
+
+
 def test_listener_script_can_be_executed_by_path():
     completed = subprocess.run(
         [sys.executable, "scripts/lark_event_listener.py", "--check-imports"],

@@ -21,6 +21,8 @@ class TaskMessageService:
 
         if not normalized:
             command_type = "unknown"
+        elif normalized.lower() in {"ping", "/ping", "hello", "hi"} or normalized in {"你好", "在吗"}:
+            command_type = "health"
         elif normalized == "确认":
             command_type = "confirm"
         elif normalized in {"现在做到哪了？", "现在做到哪了?", "进度", "状态"}:
@@ -100,4 +102,3 @@ class TaskMessageService:
         stripped = (text or "").strip()
         stripped = re.sub(r"^@Agent\s*", "", stripped, flags=re.IGNORECASE)
         return stripped.strip()
-

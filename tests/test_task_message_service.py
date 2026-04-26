@@ -27,6 +27,14 @@ def test_parse_new_task_strips_agent_mention():
     assert command.text == "帮我生成参赛方案"
 
 
+def test_parse_ping_as_health_check():
+    command = TaskMessageService().parse_text("ping", chat_id="oc_demo", message_id="om_demo")
+
+    assert command.type == "health"
+    assert command.chat_id == "oc_demo"
+    assert command.message_id == "om_demo"
+
+
 def test_parse_lark_raw_event_content():
     event = {
         "event": {
@@ -45,4 +53,3 @@ def test_parse_lark_raw_event_content():
     assert command.chat_id == "oc_demo"
     assert command.message_id == "om_demo"
     assert command.user_id == "ou_demo"
-

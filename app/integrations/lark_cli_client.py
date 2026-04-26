@@ -35,7 +35,7 @@ class LarkCliClient:
                 "bot",
                 "--chat-id",
                 chat_id,
-                "--markdown",
+                "--text",
                 text,
             ]
         )
@@ -49,7 +49,7 @@ class LarkCliClient:
                 "bot",
                 "--message-id",
                 message_id,
-                "--markdown",
+                "--text",
                 text,
             ]
         )

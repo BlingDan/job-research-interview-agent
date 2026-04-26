@@ -21,7 +21,7 @@ AgentPilotStatus = Literal[
 
 ArtifactKind = Literal["doc", "slides", "canvas"]
 ArtifactStatus = Literal["created", "updated", "fake", "dry_run", "failed"]
-MessageCommandType = Literal["new_task", "confirm", "progress", "revise", "unknown"]
+MessageCommandType = Literal["new_task", "confirm", "progress", "revise", "health", "unknown"]
 
 
 def utc_now() -> str:
@@ -106,4 +106,3 @@ class AgentPilotResponse(BaseModel):
     revisions: list[RevisionRecord] = Field(default_factory=list)
     reply: str
     error: str | None = None
-

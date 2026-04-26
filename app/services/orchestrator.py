@@ -144,6 +144,9 @@ class AgentPilotOrchestrator:
             return self._response(task, reply)
 
     def handle_command(self, command: AgentPilotCommand) -> AgentPilotResponse | None:
+        if command.type == "health":
+            self._send_command_reply(command, "Agent-Pilot 在线。请直接发送办公协同任务，或回复「确认」「现在做到哪了？」「修改：...」。")
+            return None
         if command.type == "new_task":
             return self.create_task(
                 TaskCreateRequest(
@@ -165,6 +168,12 @@ class AgentPilotOrchestrator:
         if command.type == "revise":
             return self.revise_task(task_id, command.text)
         return None
+
+    def _send_command_reply(self, command: AgentPilotCommand, text: str) -> None:
+        if command.message_id:
+            self.lark_client.reply_message(command.message_id, text)
+        elif command.chat_id:
+            self.lark_client.send_message(command.chat_id, text)
 
     def _regenerate_targets(self, task: AgentPilotTask, targets: list[ArtifactKind]) -> None:
         task.artifacts = [artifact for artifact in task.artifacts if artifact.kind not in targets]
@@ -225,4 +234,3 @@ class AgentPilotOrchestrator:
             reply=reply,
             error=task.error,
         )
-
