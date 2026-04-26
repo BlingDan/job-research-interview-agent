@@ -58,6 +58,38 @@ class LarkCliClient:
             ]
         )
 
+    def send_interactive_card(self, chat_id: str, text: str) -> dict:
+        return self._run(
+            [
+                "im",
+                "+messages-send",
+                "--as",
+                "bot",
+                "--chat-id",
+                chat_id,
+                "--msg-type",
+                "interactive",
+                "--content",
+                _interactive_card_content(text),
+            ]
+        )
+
+    def reply_interactive_card(self, message_id: str, text: str) -> dict:
+        return self._run(
+            [
+                "im",
+                "+messages-reply",
+                "--as",
+                "bot",
+                "--message-id",
+                message_id,
+                "--msg-type",
+                "interactive",
+                "--content",
+                _interactive_card_content(text),
+            ]
+        )
+
     def update_message(self, message_id: str, text: str) -> dict:
         return self._run(
             [
@@ -67,8 +99,8 @@ class LarkCliClient:
                 "--data",
                 json.dumps(
                     {
-                        "msg_type": "text",
-                        "content": _text_content(text),
+                        "msg_type": "interactive",
+                        "content": _interactive_card_content(text),
                     },
                     ensure_ascii=False,
                 ),
@@ -235,6 +267,24 @@ def _escape_xml(value: str) -> str:
 
 def _text_content(text: str) -> str:
     return json.dumps({"text": text}, ensure_ascii=False)
+
+
+def _interactive_card_content(text: str) -> str:
+    return json.dumps(
+        {
+            "config": {
+                "wide_screen_mode": True,
+                "update_multi": True,
+            },
+            "elements": [
+                {
+                    "tag": "markdown",
+                    "content": text,
+                }
+            ],
+        },
+        ensure_ascii=False,
+    )
 
 
 def build_lark_cli_command(

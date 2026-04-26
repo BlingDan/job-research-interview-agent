@@ -20,6 +20,7 @@ def test_create_task_waits_for_confirmation(tmp_path):
     assert response.plan is not None
     assert "确认" in response.reply
     assert lark_client.sent_messages[0]["text"] == "已理解需求，正在拆解执行计划..."
+    assert lark_client.sent_messages[0]["type"] == "interactive"
     assert lark_client.sent_messages[-1]["type"] == "update"
     assert lark_client.sent_messages[-1]["text"] == response.reply
 

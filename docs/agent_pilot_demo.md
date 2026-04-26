@@ -128,4 +128,4 @@ If real Feishu Docs, Slides, or Whiteboard permissions are blocked:
 - Responses include realistic artifact URLs.
 - Switching all surfaces to real Feishu requires `LARK_MODE=real` and the necessary `lark-cli` scopes.
 - Keeping only IM real requires `LARK_IM_MODE=real` and `LARK_ARTIFACT_MODE=fake`.
-- Streaming plan replies update the Bot's own IM message with `PATCH /open-apis/im/v1/messages/{message_id}`. If this fails, add the app permission for updating Bot messages, then restart the listener.
+- Streaming plan replies send one interactive Bot card, then update that same card with `PATCH /open-apis/im/v1/messages/{message_id}`. If this fails, add the app permission for updating Bot messages, then restart the listener.

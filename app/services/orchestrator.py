@@ -238,7 +238,7 @@ class AgentPilotOrchestrator:
             self._send_or_reply(task, final_text)
             return
 
-        result = self._send_or_reply_result(task, chunks[0])
+        result = self._send_or_reply_card_result(task, chunks[0])
         stream_message_id = _message_id_from_result(result)
         if not stream_message_id:
             self._send_or_reply(task, final_text)
@@ -252,11 +252,11 @@ class AgentPilotOrchestrator:
         except Exception:
             self._send_or_reply(task, final_text)
 
-    def _send_or_reply_result(self, task: AgentPilotTask, text: str) -> dict:
+    def _send_or_reply_card_result(self, task: AgentPilotTask, text: str) -> dict:
         if task.message_id:
-            return self.lark_client.reply_message(task.message_id, text)
+            return self.lark_client.reply_interactive_card(task.message_id, text)
         if task.chat_id:
-            return self.lark_client.send_message(task.chat_id, text)
+            return self.lark_client.send_interactive_card(task.chat_id, text)
         return {}
 
     def _response(self, task: AgentPilotTask, reply: str) -> AgentPilotResponse:

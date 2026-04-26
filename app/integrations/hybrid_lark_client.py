@@ -17,6 +17,12 @@ class HybridLarkClient:
     def reply_message(self, message_id: str, text: str) -> dict:
         return self.im_client.reply_message(message_id, text)
 
+    def send_interactive_card(self, chat_id: str, text: str) -> dict:
+        return self.im_client.send_interactive_card(chat_id, text)
+
+    def reply_interactive_card(self, message_id: str, text: str) -> dict:
+        return self.im_client.reply_interactive_card(message_id, text)
+
     def update_message(self, message_id: str, text: str) -> dict:
         return self.im_client.update_message(message_id, text)
 

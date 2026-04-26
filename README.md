@@ -143,7 +143,7 @@ uv run python scripts/lark_event_listener.py
 
 The listener consumes `lark-cli event +subscribe --compact`, parses IM messages, and routes them into the same Agent-Pilot orchestrator used by `/tasks`.
 
-Plan replies are streamed by sending one Bot message and then updating that same message with `PATCH /open-apis/im/v1/messages/{message_id}`. If Feishu returns a permission error, enable the Bot message update permission in the developer console or set `LARK_STREAM_DELAY_SECONDS="0"` and rely on the final fallback reply.
+Plan replies are streamed by sending one interactive Bot card and then updating that same card with `PATCH /open-apis/im/v1/messages/{message_id}`. If Feishu returns a permission error, enable the Bot message update permission in the developer console; the code falls back to sending the final plan as a normal text reply.
 
 ## Important Commands
 

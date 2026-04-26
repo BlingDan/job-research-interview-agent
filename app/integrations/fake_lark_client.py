@@ -27,6 +27,28 @@ class FakeLarkClient:
         self.sent_messages.append(payload)
         return payload
 
+    def send_interactive_card(self, chat_id: str, text: str) -> dict:
+        payload = {
+            "mode": "fake",
+            "type": "interactive",
+            "chat_id": chat_id,
+            "text": text,
+            "message_id": self._next_message_id(),
+        }
+        self.sent_messages.append(payload)
+        return payload
+
+    def reply_interactive_card(self, message_id: str, text: str) -> dict:
+        payload = {
+            "mode": "fake",
+            "type": "interactive",
+            "message_id": self._next_message_id(),
+            "reply_to_message_id": message_id,
+            "text": text,
+        }
+        self.sent_messages.append(payload)
+        return payload
+
     def update_message(self, message_id: str, text: str) -> dict:
         payload = {
             "mode": "fake",

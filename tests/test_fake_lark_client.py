@@ -22,11 +22,14 @@ def test_fake_client_records_messages():
 
     sent = client.send_message("oc_demo", "hello")
     replied = client.reply_message("om_demo", "world")
+    card = client.reply_interactive_card("om_demo", "streaming")
     client.update_message(replied["message_id"], "updated")
 
     assert client.sent_messages[0]["chat_id"] == "oc_demo"
     assert client.sent_messages[1]["reply_to_message_id"] == "om_demo"
     assert sent["message_id"].startswith("om_fake_")
     assert replied["message_id"].startswith("om_fake_")
-    assert client.sent_messages[2]["updated_message_id"] == replied["message_id"]
-    assert client.sent_messages[2]["text"] == "updated"
+    assert card["message_id"].startswith("om_fake_")
+    assert client.sent_messages[2]["type"] == "interactive"
+    assert client.sent_messages[3]["updated_message_id"] == replied["message_id"]
+    assert client.sent_messages[3]["text"] == "updated"

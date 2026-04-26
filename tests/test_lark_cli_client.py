@@ -96,7 +96,34 @@ def test_update_message_uses_patch_api(monkeypatch):
     assert "--as" in calls[0]
     assert "bot" in calls[0]
     content = calls[0][calls[0].index("--data") + 1]
-    assert json.loads(json.loads(content)["content"]) == {"text": "line1\nline2"}
+    body = json.loads(content)
+    assert body["msg_type"] == "interactive"
+    card = json.loads(body["content"])
+    assert card["elements"][0]["content"] == "line1\nline2"
+
+
+def test_reply_interactive_card_builds_card_message(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.integrations.lark_cli_client._resolve_lark_cli_prefix",
+        lambda executable: ["lark-cli"],
+    )
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout='{"message_id":"om_card"}', stderr="")
+
+    monkeypatch.setattr("app.integrations.lark_cli_client.subprocess.run", fake_run)
+    client = LarkCliClient(dry_run=True)
+
+    result = client.reply_interactive_card("om_user", "正在拆解")
+
+    assert result["message_id"] == "om_card"
+    assert "+messages-reply" in calls[0]
+    assert "interactive" in calls[0]
+    card = json.loads(calls[0][calls[0].index("--content") + 1])
+    assert card["config"]["update_multi"] is True
+    assert card["elements"][0]["tag"] == "markdown"
 
 
 def test_create_doc_builds_v2_docs_command(tmp_path, monkeypatch):
