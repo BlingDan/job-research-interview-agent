@@ -120,6 +120,11 @@ def test_run_executes_pipeline_and_persists_outputs(tmp_path: Path, monkeypatch)
         ),
     )
     monkeypatch.setattr(research_coordinator, "build_task_summary", _build_task_summary)
+    monkeypatch.setattr(
+        research_coordinator,
+        "get_local_context",
+        lambda query, doc_types=None: SimpleNamespace(summary=None),
+    )
     monkeypatch.setattr(research_coordinator, "build_report", lambda state: report)
     monkeypatch.setattr(
         research_coordinator,

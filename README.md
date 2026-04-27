@@ -1,107 +1,86 @@
 <div align="center">
-  <img src="./assets/img/job-research-interview-agent.png" alt="Job Research Interview Agent" width="100%">
-  <h1>Job Research Interview Agent</h1>
-  <h3>🔍 面向求职研究与面试准备的智能协同 Agent</h3>
-  <p><em>把岗位 JD、公司调研、面试重点和结果沉淀串成一条连续工作流</em></p>
-  <img src="https://img.shields.io/badge/Python-3.12+-3776AB?style=flat&logo=python&logoColor=white" alt="Python"/>
-  <img src="https://img.shields.io/badge/FastAPI-Backend-009688?style=flat&logo=fastapi&logoColor=white" alt="FastAPI"/>
-  <img src="https://img.shields.io/badge/Tavily-Web%20Search-4F46E5?style=flat" alt="Tavily Search"/>
-  <img src="https://img.shields.io/badge/SSE-Streaming-orange?style=flat" alt="SSE"/>
-  <img src="https://img.shields.io/badge/language-Chinese-brightgreen?style=flat" alt="Language"/>
+  <img src="./assets/img/agent-pilot.png" alt="Agent-Pilot hero image" width="100%" />
+  <h1>Agent-Pilot</h1>
+  <h3>基于 IM 的办公协同智能助手</h3>
+  <p><em>从飞书/Lark IM 对话到文档、汇报材料与画板的一键智能闭环</em></p>
+  <p>
+    <img src="https://img.shields.io/github/stars/BlingDan/job-research-interview-agent?style=flat&logo=github" alt="GitHub stars" />
+    <img src="https://img.shields.io/github/forks/BlingDan/job-research-interview-agent?style=flat&logo=github" alt="GitHub forks" />
+    <img src="https://img.shields.io/badge/platform-Feishu%20%2F%20Lark-3370ff?style=flat" alt="Feishu/Lark platform" />
+    <img src="https://img.shields.io/badge/language-Chinese-brightgreen?style=flat" alt="Language" />
+    <img src="https://img.shields.io/badge/backend-FastAPI-009688?style=flat&logo=fastapi" alt="FastAPI" />
+  </p>
 </div>
 
-## 🎯 项目在做什么
+## 项目简介
 
-这个项目聚焦一个很真实的场景: 当我们准备投递、研究岗位、了解公司、梳理面试重点时，信息通常散落在 IM、搜索引擎、个人笔记和临时文档里，过程重复、切换频繁，也很难协作。
+Agent-Pilot 是面向飞书/Lark 的办公协同智能助手，聚焦 **基于 IM 的办公协同智能助手** 比赛赛题。它把飞书作为主要交互界面：用户在 IM 中提出目标，Agent 理解任务、规划步骤、生成办公产物，并把结果回传到同一个会话。
 
-`Job Research Interview Agent` 想做的，就是把这条链路收拢成一个可执行、可追踪、可沉淀的研究流程。用户提交岗位 JD、公司名称、面试主题和补充材料后，系统会自动拆解任务、生成研究步骤、执行公开信息检索，并整理出结构化的研究结果与报告雏形。
+核心目标不是再做一个外部工作台，而是一个真正 Feishu-native 的 Agent 工作流：
 
-## 🚧 当前进度说明
-
-目前这个仓库还处在原型阶段，已经打通了“任务输入 -> 研究规划 -> 信息检索 -> 报告草稿生成”的基础链路，可以用来展示项目方向和核心工作流，但还没有完全实现理想中的最终效果。
-
-换句话说，它现在更像一个可运行、可继续扩展的第一版 Demo: 研究流程已经能跑起来，API 和任务产物也已经具备雏形，但距离真正成熟的“IM 发起任务、文档协同沉淀、结果持续迭代、展示内容自动生成”还有一段工程化与产品化完善的距离。
-
-## ✨ 当前原型能力
-
-目前仓库已经具备一条可以跑通的基础链路，而不只是概念说明:
-
-- 支持结构化任务输入，围绕岗位要求、公司背景和面试主题自动生成基础研究计划
-- 基于 Tavily 执行公开信息检索，并完成搜索结果归一化、去重、摘要整理与报告草稿生成
-- 提供基础 API、SSE 流式接口和任务产物落盘能力，方便后续接入 IM Bot 或协同前端
-
-## 🚀 为什么这个方向值得做
-
-相比一个“只回答问题”的助手，这个项目更像一个围绕求职场景设计的研究协作者。它强调的不是一次问答，而是从输入理解、任务规划、信息检索到结果输出的完整闭环。
-
-这也让它很适合继续往 IM 协同场景延展: 未来无论是接入飞书 Bot、同步飞书文档，还是把研究结果继续组织成汇报材料、面试提纲或展示页，都有比较自然的演进路径。
-
-## 🧩 一次任务会经历什么
-
-整个流程目前可以概括成 4 个动作:
-
-1. 接收岗位 JD、公司信息和面试主题。
-2. 自动拆出研究子任务，形成基础 planning。
-3. 调用搜索服务收集外部资料，并生成阶段性 summary。
-4. 汇总为最终报告，同时把中间产物写入任务目录，便于追踪和复用。
-
-## 🛠️ 快速开始
-
-仓库默认优先使用 `uv`。
-
-### 1. 启动服务
-
-```bash
-uv run uvicorn app.main:app --reload
+```text
+Feishu IM
+-> Agent 意图捕获
+-> 任务理解与计划
+-> 文档 / 幻灯片 / 画板生成
+-> 同一 IM 会话交付
+-> 进度查询与修改迭代
 ```
 
-### 2. 运行测试
+## 核心能力
+
+- **IM 原生入口**：支持群聊或私聊中的自然语言任务发起。
+- **Agent 任务规划**：Planner Agent 将目标拆解为可执行步骤和工具调用计划。
+- **办公套件联动**：生成飞书 Doc、Slides、Canvas/Whiteboard 等交付物。
+- **多端协同体验**：桌面端和移动端共享同一飞书会话、状态和产物链接。
+- **进度与修改闭环**：支持 `当前进度`、`确认`、`修改：...`、`/reset` 等交互。
+- **演示稳定性**：官方 MCP、`lark-cli`、fake artifact 多层 fallback，避免权限问题中断现场演示。
+
+## 比赛场景映射
+
+| 场景 | 赛题要求 | Agent-Pilot 对应实现 |
+| --- | --- | --- |
+| A | 意图 / 指令入口 | 飞书 IM 消息触发 Agent-Pilot 任务 |
+| B | 任务理解和规划 | Planner Agent 生成执行计划与 ToolPlan |
+| C | 文档 / 白板生成 | DocAgent 与 CanvasAgent 生成方案文档和架构画板 |
+| D | 汇报材料生成 | PresentationAgent 生成 5 页答辩 Slides |
+| E | 多端协同 | `chat_id` 绑定任务状态、产物链接和修改上下文 |
+| F | 总结与交付 | DeliveryService 将最终成果回传到同一 IM 会话 |
+
+## 快速开始
 
 ```bash
 uv run pytest
+uv run uvicorn app.main:app --reload
 ```
 
-### 3. 发起一个研究任务
+启动飞书 IM 事件监听：
 
-```json
-{
-  "jd_text": "负责大模型应用研发，要求熟悉 Python、FastAPI、RAG、Agent 工作流设计",
-  "company_name": "示例公司",
-  "interview_topic": "AI 应用后端开发",
-  "local_context_path": "data/example_resume.pdf",
-  "user_note": "希望重点准备项目深挖与行为面问题"
-}
+```bash
+uv run python scripts/lark_event_listener.py
 ```
 
-当前原型提供的核心接口包括:
-
-- `GET /health`
-- `POST /tasks`
-- `GET /stream`
-
-## 📦 项目结构
+推荐演示口令：
 
 ```text
-app/
-├── agents/      # 任务规划、总结、报告相关 Agent
-├── api/         # FastAPI 路由
-├── core/        # 配置与 LLM 客户端
-├── schemas/     # 输入输出与状态结构
-├── services/    # 编排、搜索、RAG、记忆等服务
-├── tools/       # 搜索与检索工具层
-└── main.py      # 应用入口
-
-tests/           # 当前原型测试
-docs/            # 开发记录与说明
-assets/          # README 资源
-workspace/       # 仓库内已有任务产物目录
+@Agent 帮我基于飞书比赛赛题，生成一份参赛方案文档和 5 页答辩汇报材料。重点突出 Agent 编排、多端协同、飞书办公套件联动和工程实现。
 ```
 
-## 🌱 接下来可以继续补强的方向
+## 技术栈
 
-这个仓库当前更偏“可运行原型”，下一步比较自然的增强方向包括:
+- Python / FastAPI
+- Feishu/Lark `lark-cli`
+- Official Feishu MCP Tool Layer
+- OpenAI-compatible LLM endpoint
+- pytest
 
-- 接入飞书或其他 IM Bot，把任务入口真正放进协同链路
-- 补齐本地资料解析与 RAG 能力，让候选人简历和项目材料参与研究
-- 优化报告生成质量，把结果继续延展为面试提纲、汇报内容或展示页面
-- 增强状态管理、测试覆盖和错误恢复能力，支撑更完整的真实使用
+## 文档
+
+- [演示与运行指南](./docs/agent_pilot_demo.md)
+- [架构与 Tool Layer 说明](./docs/agent_pilot_architecture.md)
+- [重构设计文档](./docs/superpowers/specs/2026-04-26-agent-pilot-refactor-design.md)
+- [Feishu MCP Tool Layer 设计](./docs/superpowers/specs/2026-04-27-feishu-mcp-tool-layer-design.md)
+
+## 项目原则
+
+**Feishu is the UI.** Agent-Pilot 不构建额外的桌面端、移动端或后台工作台；所有关键体验都应尽量发生在飞书 IM、Doc、Slides 和 Canvas/Whiteboard 中。
