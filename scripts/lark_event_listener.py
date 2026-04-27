@@ -52,13 +52,26 @@ def consume_events(stream: TextIO, orchestrator: AgentPilotOrchestrator) -> None
         handle_event_line(line, orchestrator, message_service)
 
 
+def build_event_subscribe_command() -> list[str]:
+    return build_lark_cli_command(
+        [
+            "event",
+            "+subscribe",
+            "--as",
+            "bot",
+            "--compact",
+            "--force",
+        ]
+    )
+
+
 def main() -> None:
     if "--check-imports" in sys.argv:
         print("ok")
         return
 
     process = subprocess.Popen(
-        build_lark_cli_command(["event", "+subscribe", "--compact"]),
+        build_event_subscribe_command(),
         stdout=subprocess.PIPE,
         stderr=None,
         text=True,

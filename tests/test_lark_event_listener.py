@@ -4,6 +4,7 @@ from app.services.orchestrator import AgentPilotOrchestrator
 from app.services.state_service import StateService
 from app.services.task_message_service import TaskMessageService
 from scripts.lark_event_listener import handle_event_line
+from scripts.lark_event_listener import build_event_subscribe_command
 import subprocess
 import sys
 
@@ -57,3 +58,22 @@ def test_listener_script_can_be_executed_by_path():
 
     assert completed.returncode == 0
     assert completed.stdout.strip() == "ok"
+
+
+def test_event_subscribe_command_uses_bot_identity(monkeypatch):
+    monkeypatch.setattr(
+        "scripts.lark_event_listener.build_lark_cli_command",
+        lambda args: ["lark-cli", *args],
+    )
+
+    command = build_event_subscribe_command()
+
+    assert command == [
+        "lark-cli",
+        "event",
+        "+subscribe",
+        "--as",
+        "bot",
+        "--compact",
+        "--force",
+    ]

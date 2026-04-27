@@ -3,6 +3,10 @@ from __future__ import annotations
 from app.schemas.agent_pilot import AgentPilotTask, RevisionRecord
 
 
+def format_planning_ack() -> str:
+    return "已收到需求，Planner Agent 正在解析意图、拆解任务和选择飞书工具。稍等片刻，我会在这条消息里更新执行计划。"
+
+
 def format_plan_reply(task: AgentPilotTask) -> str:
     if not task.plan:
         return "已收到任务，但计划尚未生成。"
@@ -60,6 +64,28 @@ def format_revision_reply(task: AgentPilotTask, revision: RevisionRecord) -> str
 
 def format_error_reply(task: AgentPilotTask) -> str:
     return f"任务在 {task.status} 阶段失败：{task.error or '未知错误'}。请稍后重试或发送新的修改指令。"
+
+
+def format_help_reply() -> str:
+    return "\n".join(
+        [
+            "Agent-Pilot 可用命令：",
+            "- 直接发送办公协同任务：生成方案文档、5 页答辩材料和画板",
+            "- 确认：开始执行当前计划",
+            "- 当前进度 / /status：查看当前任务状态",
+            "- 修改：...：按你的反馈迭代产物",
+            "- /reset：清除当前聊天绑定的任务上下文",
+            "- /help：查看命令",
+        ]
+    )
+
+
+def format_reset_reply() -> str:
+    return "已重置当前聊天的任务上下文。你可以重新发送一个办公协同任务。"
+
+
+def format_no_active_task_reply() -> str:
+    return "当前没有活跃任务。请直接发送一个办公协同需求，或发送 /help 查看可用命令。"
 
 
 def _next_action(task: AgentPilotTask) -> str:

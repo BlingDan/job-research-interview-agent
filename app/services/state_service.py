@@ -45,6 +45,17 @@ class StateService:
     def get_active_task_id(self, chat_id: str) -> str | None:
         return self._read_chat_index().get(chat_id)
 
+    def clear_active_task(self, chat_id: str) -> None:
+        index = self._read_chat_index()
+        if chat_id not in index:
+            return
+        index.pop(chat_id)
+        self.indexes_root.mkdir(parents=True, exist_ok=True)
+        self.chat_index_path.write_text(
+            json.dumps(index, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+
     def update_status(
         self, task: AgentPilotTask, status: AgentPilotStatus
     ) -> AgentPilotTask:
@@ -55,4 +66,3 @@ class StateService:
         if not self.chat_index_path.exists():
             return {}
         return json.loads(self.chat_index_path.read_text(encoding="utf-8"))
-

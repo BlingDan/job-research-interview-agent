@@ -1,10 +1,12 @@
 from fastapi.testclient import TestClient
 
 from app.api.routers import task as task_router
+from app.integrations.artifact_fallback_lark_client import ArtifactFallbackLarkClient
 from app.integrations.fake_lark_client import FakeLarkClient
 from app.integrations.hybrid_lark_client import HybridLarkClient
 from app.integrations.lark_cli_client import LarkCliClient
 from app.main import app
+from app.services.feishu_tool_layer import FeishuMcpToolAdapter
 from app.services.orchestrator import AgentPilotOrchestrator
 from app.services.state_service import StateService
 
@@ -66,3 +68,38 @@ def test_build_orchestrator_can_split_im_and_artifact_modes(monkeypatch, tmp_pat
     assert isinstance(orchestrator.lark_client, HybridLarkClient)
     assert isinstance(orchestrator.lark_client.im_client, LarkCliClient)
     assert isinstance(orchestrator.lark_client.artifact_client, FakeLarkClient)
+
+
+def test_build_orchestrator_wraps_real_artifacts_with_fallback(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        task_router,
+        "get_settings",
+        lambda: SimpleNamespace(
+            workspace_root=str(tmp_path),
+            lark_mode="fake",
+            lark_im_mode="real",
+                lark_artifact_mode="real",
+                lark_cli_timeout_seconds=3.0,
+                lark_stream_delay_seconds=0.0,
+                feishu_tool_mode="hybrid",
+                feishu_mcp_mode="real",
+                feishu_mcp_app_id="cli_demo",
+                feishu_mcp_app_secret="secret-value",
+                feishu_mcp_domain="https://open.feishu.cn",
+                feishu_mcp_tools="docx.builtin.import",
+                feishu_mcp_timeout_seconds=9.0,
+                feishu_mcp_token_mode="tenant_access_token",
+                feishu_mcp_use_uat=False,
+            ),
+        )
+
+    orchestrator = task_router.build_orchestrator()
+
+    assert isinstance(orchestrator.lark_client, HybridLarkClient)
+    assert isinstance(orchestrator.lark_client.artifact_client, ArtifactFallbackLarkClient)
+    assert isinstance(orchestrator.tool_layer.adapters["mcp"], FeishuMcpToolAdapter)
+    assert orchestrator.tool_layer.adapters["mcp"].mode == "real"
+    assert orchestrator.tool_layer.adapters["mcp"].use_uat is False
+    assert orchestrator.tool_layer.adapters["mcp"].client.token_mode == "tenant_access_token"

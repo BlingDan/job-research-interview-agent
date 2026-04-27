@@ -10,8 +10,10 @@ import json
 import re
 from typing import Any
 
+from app.core.config import get_settings
 from app.core.llm import JobResearchLLM
 from app.schemas.agent_pilot import AgentPlan, PlanStep
+from app.services.feishu_tool_registry import build_default_tool_plan
 from app.schemas.task import TaskCreateRequest
 
 PLANNER_SYSTEM_PROMPT = dedent(
@@ -85,20 +87,66 @@ AGENT_PILOT_PLANNER_SYSTEM_PROMPT = dedent(
     """
     你是 Agent-Pilot 的 Planner Agent。
     你的目标是把飞书 IM 中的办公协同需求拆成可执行计划，并明确需要调用的飞书办公套件。
+    你正在服务“基于 IM 的办公协同智能助手”比赛，所有规划都要让评委看出飞书原生、多端协同和 Agent 编排能力。
+
+    必须覆盖官方 A-F 场景：
+    A 意图/指令入口：从飞书 IM 捕捉自然语言需求。
+    B 任务理解和规划：拆解阶段、Agent、工具和交付物。
+    C Doc/Whiteboard 生成：生成方案文档和画板/白板图。
+    D Presentation 生成：生成 5 页答辩汇报材料。
+    E 多端协同：桌面端/移动端共享同一 IM 任务状态和产物链接。
+    F 总结交付：最终回到 IM 汇总成果和后续修改入口。
 
     只返回 JSON 对象，不要返回 Markdown。
     JSON 字段：
     - summary: 一句话说明计划
     - confirmation_prompt: 请用户回复「确认」继续
     - steps: 数组，每个对象包含 id/title/goal/agent/tool/expected_artifact
+    - tool_plan 可省略；系统会补充标准飞书工具计划
     """
 ).strip()
 
 
 def build_agent_plan(user_message: str) -> AgentPlan:
-    # The competition demo must be stable even without LLM credentials, so the
-    # deterministic plan is the default executable behavior.
-    return build_fallback_plan(user_message)
+    settings = get_settings()
+    mode = getattr(settings, "agent_pilot_planner_mode", "fallback")
+    if mode == "fallback":
+        return build_fallback_plan(user_message)
+
+    try:
+        return build_llm_agent_plan(user_message)
+    except Exception:
+        if mode == "llm":
+            raise
+        return build_fallback_plan(user_message)
+
+
+def build_llm_agent_plan(user_message: str) -> AgentPlan:
+    llm = JobResearchLLM(
+        temperature=0.2,
+        max_tokens=2048,
+    )
+    messages = [
+        {"role": "system", "content": AGENT_PILOT_PLANNER_SYSTEM_PROMPT},
+        {"role": "user", "content": _build_agent_pilot_user_prompt(user_message)},
+    ]
+    return parse_plan_output(llm.invoke(messages).strip())
+
+
+def _build_agent_pilot_user_prompt(user_message: str) -> str:
+    return dedent(
+        f"""
+        飞书 IM 原始需求：
+        {user_message}
+
+        请生成 Agent-Pilot 的执行计划。要求：
+        1. 步骤数量 4 到 6 步，必须体现 PlannerAgent、DocAgent、PresentationAgent、CanvasAgent、DeliveryService。
+        2. 每一步写清楚 goal、agent、tool 和 expected_artifact。
+        3. tool 必须优先使用 Feishu IM、Feishu Doc、Feishu Slides、Feishu Canvas/Whiteboard。
+        4. confirmation_prompt 必须要求用户回复「确认」后再继续生成产物。
+        5. 计划要像真实 Agent 编排，不要像固定脚本。
+        """
+    ).strip()
 
 
 def parse_plan_output(raw_text: str) -> AgentPlan:
@@ -142,6 +190,7 @@ def parse_plan_output(raw_text: str) -> AgentPlan:
         confirmation_prompt=str(
             data.get("confirmation_prompt") or "回复「确认」后我开始生成文档、汇报材料和画板。"
         ).strip(),
+        tool_plan=build_default_tool_plan(),
     )
 
 
@@ -191,4 +240,5 @@ def build_fallback_plan(user_message: str) -> AgentPlan:
             ),
         ],
         confirmation_prompt="回复「确认」后我开始生成参赛方案文档、5 页答辩材料和架构画板。",
+        tool_plan=build_default_tool_plan(),
     )

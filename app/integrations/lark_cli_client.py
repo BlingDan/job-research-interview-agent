@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -123,10 +124,12 @@ class LarkCliClient:
                 "v2",
                 "--as",
                 "user",
+                "--title",
+                title,
                 "--doc-format",
                 "markdown",
                 "--content",
-                content,
+                f"@{path.as_posix()}",
             ]
         )
         return self._artifact_from_result(
@@ -161,7 +164,7 @@ class LarkCliClient:
                 slide_payload,
             ]
         )
-        return self._artifact_from_result(
+        artifact = self._artifact_from_result(
             result,
             task_id=task_id,
             kind="slides",
@@ -170,6 +173,11 @@ class LarkCliClient:
             fallback_url=f"https://dry-run.feishu.local/slides/{task_id}",
             summary="已生成 5 页答辩汇报材料。",
         )
+        if not self.dry_run and artifact.token and _is_fallback_url(artifact.url):
+            metadata_url = self._drive_meta_url(artifact.token, "slides")
+            if metadata_url:
+                artifact.url = metadata_url
+        return artifact
 
     def create_canvas(
         self, task_id: str, title: str, mermaid: str, task_dir: Path
@@ -177,14 +185,66 @@ class LarkCliClient:
         task_dir.mkdir(parents=True, exist_ok=True)
         path = task_dir / "canvas.mmd"
         path.write_text(mermaid, encoding="utf-8")
+        try:
+            result = self._run(
+                [
+                    "docs",
+                    "+create",
+                    "--api-version",
+                    "v2",
+                    "--as",
+                    "user",
+                    "--title",
+                    title,
+                    "--doc-format",
+                    "markdown",
+                    "--content",
+                    f"@{_write_whiteboard_doc_seed(task_dir, title).as_posix()}",
+                ]
+            )
+        except LarkCliError as exc:
+            if not self.dry_run:
+                raise
+            return ArtifactRef(
+                artifact_id=f"{task_id}-canvas",
+                kind="canvas",
+                title=title,
+                url=f"https://dry-run.feishu.local/whiteboard/{task_id}",
+                token=f"dry-run-whiteboard-{task_id}",
+                local_path=str(path),
+                status="dry_run",
+                summary=f"画板 dry-run 未执行：{exc}",
+            )
+        board_token = _extract_whiteboard_token(result)
+        doc_url = _first_result_value(result, "url", "document_url")
+        doc_token = _first_result_value(result, "document_id", "token")
+        if board_token:
+            self._run(
+                [
+                    "whiteboard",
+                    "+update",
+                    "--as",
+                    "user",
+                    "--whiteboard-token",
+                    board_token,
+                    "--source",
+                    f"@{path.as_posix()}",
+                    "--input_format",
+                    "mermaid",
+                    "--idempotent-token",
+                    f"agentpilot-{uuid.uuid4().hex[:16]}",
+                    "--overwrite",
+                    "--yes",
+                ]
+            )
         return ArtifactRef(
             artifact_id=f"{task_id}-canvas",
             kind="canvas",
             title=title,
-            url=f"https://dry-run.feishu.local/whiteboard/{task_id}",
-            token=f"dry-run-whiteboard-{task_id}",
+            url=doc_url or f"https://dry-run.feishu.local/whiteboard/{task_id}",
+            token=board_token or doc_token or f"dry-run-whiteboard-{task_id}",
             local_path=str(path),
-            status="dry_run" if self.dry_run else "fake",
+            status="dry_run" if self.dry_run else "created",
             summary="已生成 Agent 编排架构画板。",
         )
 
@@ -227,9 +287,20 @@ class LarkCliClient:
         fallback_url: str,
         summary: str,
     ) -> ArtifactRef:
-        data = result.get("data") if isinstance(result.get("data"), dict) else result
-        url = data.get("url") or data.get("document_url") or data.get("presentation_url") or fallback_url
-        token = data.get("token") or data.get("document_id") or data.get("xml_presentation_id")
+        url = _first_result_value(
+            result,
+            "url",
+            "document_url",
+            "presentation_url",
+            "share_url",
+        ) or fallback_url
+        token = _first_result_value(
+            result,
+            "token",
+            "document_id",
+            "xml_presentation_id",
+            "presentation_id",
+        )
         return ArtifactRef(
             artifact_id=f"{task_id}-{kind}",
             kind=kind,  # type: ignore[arg-type]
@@ -255,6 +326,31 @@ class LarkCliClient:
             "</data></slide>"
         )
 
+    def _drive_meta_url(self, token: str, doc_type: str) -> str | None:
+        try:
+            result = self._run(
+                [
+                    "drive",
+                    "metas",
+                    "batch_query",
+                    "--as",
+                    "bot",
+                    "--data",
+                    json.dumps(
+                        {
+                            "request_docs": [
+                                {"doc_token": token, "doc_type": doc_type},
+                            ],
+                            "with_url": True,
+                        },
+                        ensure_ascii=False,
+                    ),
+                ]
+            )
+        except LarkCliError:
+            return None
+        return _first_result_value(result, "url")
+
 
 def _escape_xml(value: str) -> str:
     return (
@@ -263,6 +359,15 @@ def _escape_xml(value: str) -> str:
         .replace(">", "&gt;")
         .replace('"', "&quot;")
     )
+
+
+def _write_whiteboard_doc_seed(task_dir: Path, title: str) -> Path:
+    path = task_dir / "canvas_seed.md"
+    path.write_text(
+        f"# {title}\n\n<whiteboard type=\"blank\"></whiteboard>",
+        encoding="utf-8",
+    )
+    return path
 
 
 def _text_content(text: str) -> str:
@@ -285,6 +390,39 @@ def _interactive_card_content(text: str) -> str:
         },
         ensure_ascii=False,
     )
+
+
+def _first_result_value(result: dict[str, Any], *keys: str) -> str | None:
+    for node in _walk_dicts(result):
+        for key in keys:
+            value = node.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return None
+
+
+def _extract_whiteboard_token(result: dict[str, Any]) -> str | None:
+    for node in _walk_dicts(result):
+        block_type = str(node.get("block_type") or node.get("type") or "").lower()
+        if "whiteboard" in block_type:
+            token = node.get("block_token") or node.get("token")
+            if isinstance(token, str) and token:
+                return token
+    return None
+
+
+def _is_fallback_url(url: str | None) -> bool:
+    return not url or "dry-run.feishu.local" in url or "fake.feishu.local" in url
+
+
+def _walk_dicts(value: Any):
+    if isinstance(value, dict):
+        yield value
+        for item in value.values():
+            yield from _walk_dicts(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _walk_dicts(item)
 
 
 def build_lark_cli_command(
@@ -320,13 +458,35 @@ def _resolve_lark_cli_prefix(executable: str) -> list[str]:
 
 
 def _command_prefix_from_path(path: str) -> list[str]:
-    if path.lower().endswith(".ps1"):
-        return [
-            "powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            path,
-        ]
+    node_prefix = _node_cli_prefix_from_npm_shim(path)
+    if node_prefix:
+        return node_prefix
+    lower_path = path.lower()
+    if lower_path.endswith((".cmd", ".bat")):
+        powershell_script = Path(path).with_suffix(".ps1")
+        if powershell_script.exists():
+            return _powershell_file_prefix(str(powershell_script))
+    if lower_path.endswith(".ps1"):
+        return _powershell_file_prefix(path)
     return [path]
+
+
+def _node_cli_prefix_from_npm_shim(path: str) -> list[str] | None:
+    shim_dir = Path(path).parent
+    run_js = shim_dir / "node_modules" / "@larksuite" / "cli" / "scripts" / "run.js"
+    if not run_js.exists():
+        return None
+    node_exe = shim_dir.parent / "node.exe"
+    node_command = str(node_exe) if node_exe.exists() else "node"
+    return [node_command, str(run_js)]
+
+
+def _powershell_file_prefix(path: str) -> list[str]:
+    return [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        path,
+    ]

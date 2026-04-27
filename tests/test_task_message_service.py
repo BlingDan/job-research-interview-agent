@@ -20,10 +20,28 @@ def test_parse_current_progress_query():
     assert command.type == "progress"
 
 
+def test_parse_slash_status_command():
+    command = TaskMessageService().parse_text("/status")
+
+    assert command.type == "progress"
+
+
 def test_parse_revision():
     command = TaskMessageService().parse_text("修改：PPT 更突出工程实现")
 
     assert command.type == "revise"
+
+
+def test_parse_slash_help_command():
+    command = TaskMessageService().parse_text("/help")
+
+    assert command.type == "help"
+
+
+def test_parse_slash_reset_command():
+    command = TaskMessageService().parse_text("/reset")
+
+    assert command.type == "reset"
 
 
 def test_parse_new_task_strips_agent_mention():

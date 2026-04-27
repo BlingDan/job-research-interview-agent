@@ -18,14 +18,19 @@ class TaskMessageService:
         task_id: str | None = None,
     ) -> AgentPilotCommand:
         normalized = self._strip_bot_mention(text)
+        lower = normalized.lower()
 
         if not normalized:
             command_type = "unknown"
-        elif normalized.lower() in {"ping", "/ping", "hello", "hi"} or normalized in {"你好", "在吗"}:
+        elif lower in {"/help", "help", "帮助", "命令"}:
+            command_type = "help"
+        elif lower in {"/reset", "reset", "重置", "清空上下文"}:
+            command_type = "reset"
+        elif lower in {"ping", "/ping", "hello", "hi"} or normalized in {"你好", "在吗"}:
             command_type = "health"
         elif normalized == "确认":
             command_type = "confirm"
-        elif normalized in {"现在做到哪了？", "现在做到哪了?", "进度", "当前进度", "状态"}:
+        elif lower in {"/status", "status"} or normalized in {"现在做到哪了？", "现在做到哪了?", "进度", "当前进度", "状态"}:
             command_type = "progress"
         elif normalized.startswith(("修改：", "修改:")):
             command_type = "revise"

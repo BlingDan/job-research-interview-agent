@@ -144,7 +144,38 @@ def test_create_doc_builds_v2_docs_command(tmp_path, monkeypatch):
 
     assert artifact.url == "https://doc"
     assert calls[0][1:5] == ["docs", "+create", "--api-version", "v2"]
+    assert "--title" in calls[0]
+    assert calls[0][calls[0].index("--title") + 1] == "方案"
+    assert "--doc-format" in calls[0]
+    assert calls[0][calls[0].index("--doc-format") + 1] == "markdown"
+    assert "--content" in calls[0]
+    markdown_source = calls[0][calls[0].index("--content") + 1]
+    assert markdown_source.startswith("@")
+    assert Path(markdown_source[1:]).read_text(encoding="utf-8") == "# 方案"
+    assert "--markdown" not in calls[0]
     assert (tmp_path / "doc.md").exists()
+
+
+def test_create_doc_extracts_nested_document_result(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "app.integrations.lark_cli_client._resolve_lark_cli_prefix",
+        lambda executable: ["lark-cli"],
+    )
+
+    def fake_run(command, **kwargs):
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"data":{"document":{"url":"https://docx","document_id":"docx_token"}}}',
+            stderr="",
+        )
+
+    monkeypatch.setattr("app.integrations.lark_cli_client.subprocess.run", fake_run)
+    client = LarkCliClient(dry_run=False)
+
+    artifact = client.create_doc("task-1", "方案", "# 方案", Path(tmp_path))
+
+    assert artifact.url == "https://docx"
+    assert artifact.token == "docx_token"
 
 
 def test_create_slides_builds_slides_command(tmp_path, monkeypatch):
@@ -168,13 +199,119 @@ def test_create_slides_builds_slides_command(tmp_path, monkeypatch):
     assert "--slides" in calls[0]
 
 
+def test_create_slides_fetches_drive_metadata_url_when_create_returns_token_only(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.integrations.lark_cli_client._resolve_lark_cli_prefix",
+        lambda executable: ["lark-cli"],
+    )
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[1:3] == ["slides", "+create"]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout='{"data":{"xml_presentation_id":"slides-token"}}',
+                stderr="",
+            )
+        return SimpleNamespace(
+            returncode=0,
+            stdout='{"data":{"metas":[{"url":"https://example.feishu.cn/slides/slides-token"}]}}',
+            stderr="",
+        )
+
+    monkeypatch.setattr("app.integrations.lark_cli_client.subprocess.run", fake_run)
+    client = LarkCliClient(dry_run=False)
+
+    artifact = client.create_slides("task-1", "汇报", [{"title": "封面", "body": "内容"}], Path(tmp_path))
+
+    assert artifact.url == "https://example.feishu.cn/slides/slides-token"
+    assert artifact.token == "slides-token"
+    assert calls[1][1:4] == ["drive", "metas", "batch_query"]
+    assert calls[1][calls[1].index("--as") + 1] == "bot"
+    metadata_payload = json.loads(calls[1][calls[1].index("--data") + 1])
+    assert metadata_payload["request_docs"] == [{"doc_token": "slides-token", "doc_type": "slides"}]
+    assert metadata_payload["with_url"] is True
+
+
+def test_create_canvas_creates_whiteboard_doc_and_updates_mermaid(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.integrations.lark_cli_client._resolve_lark_cli_prefix",
+        lambda executable: ["lark-cli"],
+    )
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[1:3] == ["docs", "+create"]:
+            return SimpleNamespace(
+                returncode=0,
+                stdout=(
+                    '{"data":{"document":{"url":"https://doc-with-board",'
+                    '"document_id":"doc_token","new_blocks":[{"block_type":"whiteboard",'
+                    '"block_token":"wb_token"}]}}}'
+                ),
+                stderr="",
+            )
+        return SimpleNamespace(returncode=0, stdout='{"ok":true}', stderr="")
+
+    monkeypatch.setattr("app.integrations.lark_cli_client.subprocess.run", fake_run)
+    client = LarkCliClient(dry_run=False)
+
+    artifact = client.create_canvas("task-1", "架构画板", "flowchart LR\nA-->B", Path(tmp_path))
+
+    assert artifact.url == "https://doc-with-board"
+    assert artifact.token == "wb_token"
+    assert calls[0][1:3] == ["docs", "+create"]
+    assert "--title" in calls[0]
+    assert calls[0][calls[0].index("--title") + 1] == "架构画板"
+    assert "--doc-format" in calls[0]
+    assert calls[0][calls[0].index("--doc-format") + 1] == "markdown"
+    assert "--content" in calls[0]
+    assert "--markdown" not in calls[0]
+    markdown_source = calls[0][calls[0].index("--content") + 1]
+    assert markdown_source.startswith("@")
+    markdown = Path(markdown_source[1:]).read_text(encoding="utf-8")
+    assert '<whiteboard type="blank"></whiteboard>' in markdown
+    assert calls[1][1:3] == ["whiteboard", "+update"]
+    assert calls[1][calls[1].index("--whiteboard-token") + 1] == "wb_token"
+    assert "--input_format" in calls[1]
+    assert "mermaid" in calls[1]
+    assert "--overwrite" in calls[1]
+    assert "--yes" in calls[1]
+    assert (tmp_path / "canvas.mmd").exists()
+
+
+def test_create_canvas_dry_run_returns_artifact_when_whiteboard_requires_auth(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "app.integrations.lark_cli_client._resolve_lark_cli_prefix",
+        lambda executable: ["lark-cli"],
+    )
+
+    def fake_run(command, **kwargs):
+        return SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="Error: need_user_authorization (user: )",
+        )
+
+    monkeypatch.setattr("app.integrations.lark_cli_client.subprocess.run", fake_run)
+    client = LarkCliClient(dry_run=True)
+
+    artifact = client.create_canvas("task-1", "架构画板", "flowchart LR", Path(tmp_path))
+
+    assert artifact.status == "dry_run"
+    assert artifact.url == "https://dry-run.feishu.local/whiteboard/task-1"
+    assert "need_user_authorization" in artifact.summary
+
+
 def test_build_lark_cli_command_wraps_powershell_script(monkeypatch):
     monkeypatch.setattr("app.integrations.lark_cli_client.shutil.which", lambda _: None)
 
     def fake_run(command, **kwargs):
         return SimpleNamespace(
             returncode=0,
-            stdout="D:\\path\\nodejs\\node_global\\lark-cli.ps1\n",
+            stdout="C:\\missing\\node_global\\lark-cli.ps1\n",
             stderr="",
         )
 
@@ -192,3 +329,27 @@ def test_build_lark_cli_command_wraps_powershell_script(monkeypatch):
         "-File",
     ]
     assert command[-2:] == ["event", "+subscribe"]
+
+
+def test_build_lark_cli_command_prefers_direct_node_entrypoint_for_npm_shim(monkeypatch):
+    monkeypatch.setattr(
+        "app.integrations.lark_cli_client.shutil.which",
+        lambda _: "D:\\path\\nodejs\\node_global\\lark-cli.CMD",
+    )
+
+    def fake_exists(self):
+        text = str(self)
+        return text.endswith("node_modules\\@larksuite\\cli\\scripts\\run.js") or text.endswith("node.exe")
+
+    monkeypatch.setattr(
+        "app.integrations.lark_cli_client.Path.exists",
+        fake_exists,
+    )
+
+    from app.integrations.lark_cli_client import build_lark_cli_command
+
+    command = build_lark_cli_command(["slides", "+create"])
+
+    assert command[0].endswith("node.exe")
+    assert command[1].endswith("node_modules\\@larksuite\\cli\\scripts\\run.js")
+    assert command[-2:] == ["slides", "+create"]
