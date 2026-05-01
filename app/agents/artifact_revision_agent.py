@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import concurrent.futures
+import json
 import re
 from collections.abc import Callable
 from copy import deepcopy
 from datetime import datetime
-from typing import Literal
+from textwrap import dedent
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from app.core.config import get_settings
+from app.core.llm import JobResearchLLM
 from app.schemas.agent_pilot import ArtifactKind
 
 
@@ -310,3 +315,163 @@ def _normalize(value: str) -> str:
 def _raise_if_clarification_needed(patch: ArtifactRevisionPatch) -> None:
     if patch.needs_clarification:
         raise ValueError(patch.clarification_question or "修改指令需要进一步澄清。")
+
+
+# ---------------------------------------------------------------------------
+# LLM-powered full-content rewrite
+# ---------------------------------------------------------------------------
+
+_MAX_INPUT_CHARS = 60000
+
+_REVISION_DOC_PROMPT = dedent("""\
+你是飞书文档编辑 Agent。用户对一份 Markdown 文档提出了修改意见。
+你的任务是返回修改后的完整 Markdown 文档。
+
+规则：
+1. 输出的 Markdown 结构与输入保持一致（标题层级、列表、代码块等）
+2. 只修改用户指定的部分，其他内容逐字保留
+3. 不要添加任何解释、注释或说明文字
+4. 如果用户要求在特定位置插入内容，准确定位并插入
+5. 如果用户要求改写某段，保持该段的原有结构框架，只替换内容
+
+返回格式（严格 JSON，不要 Markdown 代码块包裹）：
+{"content": "修改后的完整 Markdown 文档", "change_summary": "一句话简述做了什么修改"}""")
+
+_REVISION_SLIDES_PROMPT = dedent("""\
+你是飞书演示文稿编辑 Agent。用户对一份 JSON 格式的幻灯片文件提出了修改意见。
+你的任务是返回修改后的完整 JSON 幻灯片数组。
+
+输入和输出格式：
+[{"title": "页面标题", "body": "页面正文"}, ...]
+
+规则：
+1. 保持页面数量不变，除非用户明确要求添加或删除页面
+2. 保持每页的 title 不变，除非用户要求改标题
+3. body 字段按用户指令修改
+4. 输出的 JSON 必须是合法的 JSON 数组，每个元素必须有 title 和 body 字段
+5. 不要添加其他字段，不要包装在 Markdown 代码块中
+6. 不要添加解释文字
+
+返回格式（严格 JSON）：
+{"content": [{"title": "...", "body": "..."}, ...], "change_summary": "一句话简述做了什么修改"}""")
+
+_REVISION_CANVAS_PROMPT = dedent("""\
+你是飞书画板（Mermaid 架构图）编辑 Agent。用户对一份 Mermaid 流程图提出了修改意见。
+你的任务是返回修改后的完整 Mermaid 代码。
+
+规则：
+1. 保持原有的 graph/flowchart 声明和整体布局
+2. 按用户指令添加、删除或修改节点和连线
+3. 节点标签使用双引号包裹
+4. 输出的 Mermaid 代码必须是合法的 Mermaid 语法
+5. 不要包装在代码块中，不要添加解释文字
+
+返回格式（严格 JSON）：
+{"content": "修改后的完整 Mermaid 代码", "change_summary": "一句话简述做了什么修改"}""")
+
+_REVISION_PROMPTS: dict[ArtifactKind, str] = {
+    "doc": _REVISION_DOC_PROMPT,
+    "slides": _REVISION_SLIDES_PROMPT,
+    "canvas": _REVISION_CANVAS_PROMPT,
+}
+
+
+def _revision_timeout() -> float:
+    return float(getattr(get_settings(), "agent_pilot_router_timeout_seconds", 15.0))
+
+
+def build_llm_revision_content(
+    instruction: str,
+    current_content: str,
+    artifact_kind: ArtifactKind,
+    *,
+    max_input_chars: int = _MAX_INPUT_CHARS,
+) -> tuple[str, str]:
+    if len(current_content) > max_input_chars:
+        raise ValueError(f"内容过长（{len(current_content)} 字符），请指定具体要修改的段落或页面。")
+
+    system_prompt = _REVISION_PROMPTS.get(artifact_kind, _REVISION_DOC_PROMPT)
+    user_message = f"当前内容：\n{current_content}\n\n修改指令：{instruction}"
+
+    llm = JobResearchLLM(temperature=0.3, max_tokens=8192)
+    messages: list[dict[str, str]] = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message},
+    ]
+
+    raw = _call_llm_with_timeout(llm, messages)
+    content_str, change_summary = _parse_revision_llm_response(raw)
+    validated = _validate_rewritten_content(content_str, artifact_kind)
+    return validated, change_summary
+
+
+def _call_llm_with_timeout(llm: JobResearchLLM, messages: list[dict[str, str]]) -> str:
+    timeout = _revision_timeout()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(llm.invoke, messages)
+        return future.result(timeout=timeout)
+
+
+def _parse_revision_llm_response(raw: str) -> tuple[str, str]:
+    data = _extract_json_object(raw)
+    content = data.get("content")
+    if isinstance(content, (list, dict)):
+        content = json.dumps(content, ensure_ascii=False, indent=2)
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("LLM 返回的内容为空。")
+    change_summary = str(data.get("change_summary") or "") or "已根据指令重写内容。"
+    return content.strip(), change_summary.strip()
+
+
+def _extract_json_object(raw_text: str) -> dict[str, Any]:
+    text = raw_text.strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL | re.IGNORECASE)
+        if fenced:
+            data = json.loads(fenced.group(1).strip())
+        else:
+            obj_match = re.search(r"({.*})", text, re.DOTALL)
+            if not obj_match:
+                raise ValueError("Failed to extract JSON from LLM revision response.")
+            data = json.loads(obj_match.group(1))
+    if not isinstance(data, dict):
+        raise ValueError("LLM revision response must be a JSON object.")
+    return data
+
+
+def _validate_rewritten_content(content: str, kind: ArtifactKind) -> str:
+    if kind == "doc":
+        return _validate_doc_content(content)
+    if kind == "slides":
+        return _validate_slides_content(content)
+    return _validate_canvas_content(content)
+
+
+def _validate_doc_content(content: str) -> str:
+    if not re.search(r"^#+\s", content, re.MULTILINE):
+        raise ValueError("重写后的文档缺少标题结构。")
+    return content
+
+
+def _validate_slides_content(content: str) -> str:
+    try:
+        slides = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"重写后的幻灯片不是合法 JSON：{exc}") from exc
+    if not isinstance(slides, list):
+        raise ValueError("重写后的幻灯片必须是 JSON 数组。")
+    for index, slide in enumerate(slides):
+        if not isinstance(slide, dict):
+            raise ValueError(f"幻灯片第 {index + 1} 页不是对象。")
+        if not ("title" in slide or "body" in slide):
+            raise ValueError(f"幻灯片第 {index + 1} 页缺少 title 或 body 字段。")
+    return json.dumps(slides, ensure_ascii=False, indent=2)
+
+
+def _validate_canvas_content(content: str) -> str:
+    trimmed = content.strip()
+    if not (trimmed.startswith("graph") or trimmed.startswith("flowchart")):
+        raise ValueError("重写后的画板内容不是合法的 Mermaid 代码（需要以 graph 或 flowchart 开头）。")
+    return trimmed

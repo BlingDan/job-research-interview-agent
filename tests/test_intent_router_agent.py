@@ -6,7 +6,10 @@ from app.agents.intent_router_agent import (
 )
 
 
-def test_route_doc_revision_without_prefix():
+def test_route_doc_revision_without_prefix(monkeypatch):
+    monkeypatch.setenv("AGENT_PILOT_ROUTER_MODE", "auto")
+    from app.core.config import get_settings
+    get_settings.cache_clear()
     route = route_agent_pilot_message("在 Agent-Pilot 参赛方案 中的最后一行添加现在的时间YY-MM-DD HH:MM")
 
     assert route.command_type == "revise"
@@ -17,6 +20,9 @@ def test_route_doc_revision_without_prefix():
 
 
 def test_route_presentation_revision_via_llm(monkeypatch):
+    monkeypatch.setenv("AGENT_PILOT_ROUTER_MODE", "auto")
+    from app.core.config import get_settings
+    get_settings.cache_clear()
     from app.agents import intent_router_agent
 
     class FakeLLM:
@@ -59,6 +65,9 @@ def test_fallback_no_longer_matches_generic_canvas_terms():
 
 
 def test_route_canvas_revision_via_llm(monkeypatch):
+    monkeypatch.setenv("AGENT_PILOT_ROUTER_MODE", "auto")
+    from app.core.config import get_settings
+    get_settings.cache_clear()
     from app.agents import intent_router_agent
 
     class FakeLLM:
@@ -86,7 +95,10 @@ def test_route_canvas_revision_via_llm(monkeypatch):
     assert route.route_source == "llm"
 
 
-def test_route_ambiguous_revision_requests_clarification():
+def test_route_ambiguous_revision_requests_clarification(monkeypatch):
+    monkeypatch.setenv("AGENT_PILOT_ROUTER_MODE", "auto")
+    from app.core.config import get_settings
+    get_settings.cache_clear()
     route = route_agent_pilot_message("修改：更突出工程实现")
 
     assert route.command_type == "revise"
@@ -118,6 +130,9 @@ def test_hard_commands_have_hard_command_source():
 
 
 def test_llm_router_parses_structured_route(monkeypatch):
+    monkeypatch.setenv("AGENT_PILOT_ROUTER_MODE", "auto")
+    from app.core.config import get_settings
+    get_settings.cache_clear()
     from app.agents import intent_router_agent
 
     class FakeLLM:

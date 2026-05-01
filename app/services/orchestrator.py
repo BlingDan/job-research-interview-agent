@@ -18,6 +18,7 @@ from app.agents.artifact_revision_agent import (
     apply_doc_patch,
     apply_slides_patch,
     build_artifact_revision_patch,
+    build_llm_revision_content,
 )
 from app.integrations.fake_lark_client import FakeLarkClient
 from app.integrations.lark_client import LarkClient
@@ -221,28 +222,50 @@ class AgentPilotOrchestrator:
                 self._send_or_reply(task, reply)
                 return self._response(task, reply)
 
-            patches = [
-                build_artifact_revision_patch(instruction, target)
-                for target in targets
-            ]
-            if any(patch.needs_clarification for patch in patches):
-                self.state_service.update_status(task, "DONE")
-                reply = with_fallback_notice(
-                    format_revision_clarification_reply(task, instruction), route_source
-                )
-                self._send_or_reply(task, reply)
-                return self._response(task, reply)
+            used_fallback = False
+            summaries: list[str] = []
+            for target in targets:
+                current = self._read_artifact_content(task, target)
+                if current is None:
+                    current = self._regenerate_content(task, target)
 
+                rewritten, change_summary = None, ""
+                try:
+                    rewritten, change_summary = build_llm_revision_content(
+                        instruction, current, target
+                    )
+                except Exception:
+                    used_fallback = True
+
+                if rewritten is not None:
+                    try:
+                        self._overwrite_artifact_content(task, target, rewritten)
+                        summaries.append(change_summary or f"已重写 {target} 内容。")
+                        continue
+                    except Exception:
+                        used_fallback = True
+
+                patch = build_artifact_revision_patch(instruction, target)
+                if patch.needs_clarification:
+                    self.state_service.update_status(task, "DONE")
+                    reply = with_fallback_notice(
+                        format_revision_clarification_reply(task, instruction), route_source
+                    )
+                    self._send_or_reply(task, reply)
+                    return self._response(task, reply)
+                self._apply_single_patch(task, patch)
+                summaries.append(_single_patch_summary(patch))
+
+            effective_source = "fallback" if used_fallback else (route_source or "llm")
             revision = RevisionRecord(
                 revision_id=str(uuid.uuid4()),
                 instruction=instruction,
                 target_artifacts=targets,
-                summary=route_reason or _patch_summary(patches),
+                summary=route_reason or "；".join(summaries),
             )
             task.revisions.append(revision)
-            self._apply_revision_patches(task, patches)
             self.state_service.update_status(task, "DONE")
-            reply = with_fallback_notice(format_revision_reply(task, revision), route_source)
+            reply = with_fallback_notice(format_revision_reply(task, revision), effective_source)
             self._send_or_reply(task, reply)
             return self._response(task, reply)
         except Exception as exc:
@@ -251,6 +274,65 @@ class AgentPilotOrchestrator:
             reply = format_error_reply(task)
             self._send_or_reply(task, reply)
             return self._response(task, reply)
+
+    def _overwrite_artifact_content(
+        self, task: AgentPilotTask, kind: ArtifactKind, content: str
+    ) -> None:
+        task_dir = self.state_service.task_dir(task.task_id)
+        existing = _artifact_by_kind(task.artifacts, kind)
+        if kind == "doc":
+            artifact = self.lark_client.update_doc(task.task_id, existing, content, task_dir)
+        elif kind == "slides":
+            slides_data = json.loads(content)
+            artifact = self.lark_client.update_slides(task.task_id, existing, slides_data, task_dir)
+        else:
+            artifact = self.lark_client.update_canvas(task.task_id, existing, content, task_dir)
+        _replace_artifact(task, artifact)
+
+    def _read_artifact_content(self, task: AgentPilotTask, kind: ArtifactKind) -> str | None:
+        existing = _artifact_by_kind(task.artifacts, kind)
+        if kind == "slides":
+            slides = _read_slides_artifact(existing)
+            if slides is None:
+                return None
+            return json.dumps(slides, ensure_ascii=False, indent=2)
+        return _read_text_artifact(existing)
+
+    def _regenerate_content(self, task: AgentPilotTask, kind: ArtifactKind) -> str:
+        if kind == "doc":
+            return build_doc_artifact(task)
+        if kind == "slides":
+            return json.dumps(build_slide_artifact(task), ensure_ascii=False, indent=2)
+        return build_canvas_artifact(task)
+
+    def _apply_single_patch(self, task: AgentPilotTask, patch: ArtifactRevisionPatch) -> None:
+        task_dir = self.state_service.task_dir(task.task_id)
+        existing = _artifact_by_kind(task.artifacts, patch.target_artifact)
+        if patch.target_artifact == "doc":
+            content = _read_text_artifact(existing) or build_doc_artifact(task)
+            updated_content = apply_doc_patch(content, patch)
+            if existing:
+                artifact = self.lark_client.update_doc(task.task_id, existing, updated_content, task_dir)
+            else:
+                self._execute_artifact(task, "create_doc", "Agent-Pilot 参赛方案", updated_content)
+                return
+        elif patch.target_artifact == "slides":
+            slides = _read_slides_artifact(existing) or build_slide_artifact(task)
+            updated_slides = apply_slides_patch(slides, patch)
+            if existing:
+                artifact = self.lark_client.update_slides(task.task_id, existing, updated_slides, task_dir)
+            else:
+                self._execute_artifact(task, "create_slides", "Agent-Pilot 5 页答辩汇报材料", updated_slides)
+                return
+        else:
+            mermaid = _read_text_artifact(existing) or build_canvas_artifact(task)
+            updated_mermaid = apply_canvas_patch(mermaid, patch)
+            if existing:
+                artifact = self.lark_client.update_canvas(task.task_id, existing, updated_mermaid, task_dir)
+            else:
+                self._execute_artifact(task, "create_canvas", "Agent-Pilot 编排架构画板", updated_mermaid)
+                return
+        _replace_artifact(task, artifact)
 
     def handle_command(self, command: AgentPilotCommand) -> AgentPilotResponse | None:
         if command.type == "help":
@@ -566,6 +648,10 @@ def _read_slides_artifact(artifact: ArtifactRef | None) -> list[dict[str, str]] 
         if isinstance(item, dict):
             slides.append({str(key): str(value or "") for key, value in item.items()})
     return slides or None
+
+
+def _single_patch_summary(patch: ArtifactRevisionPatch) -> str:
+    return f"{patch.target_artifact}: {patch.operation} {patch.location}"
 
 
 def _patch_summary(patches: list[ArtifactRevisionPatch]) -> str:

@@ -2,6 +2,8 @@ import json
 import re
 import time
 
+import pytest
+
 from app.integrations.fake_lark_client import FakeLarkClient
 from app.integrations.feishu_mcp_client import McpToolInfo, McpToolResult
 from app.schemas.agent_pilot import AgentPilotCommand, TaskCreateRequest
@@ -9,6 +11,24 @@ from app.services.feishu_tool_layer import FeishuMcpToolAdapter, FeishuToolLayer
 from app.services.orchestrator import AgentPilotOrchestrator
 from app.services.state_service import StateService
 from app.services.task_message_service import TaskMessageService
+
+
+class _FakeRevisionLLM:
+    def __init__(self, **kwargs):
+        pass
+
+    def invoke(self, messages):
+        # Return content that fails all artifact-type validations so keyword
+        # fallback is always used in orchestrator tests.
+        return json.dumps({"content": "fallback-trigger", "change_summary": "触发兜底"})
+
+
+@pytest.fixture(autouse=True)
+def _patch_revision_llm(monkeypatch):
+    """Avoid real LLM calls in build_llm_revision_content across all orchestrator tests."""
+    from app.agents import artifact_revision_agent
+
+    monkeypatch.setattr(artifact_revision_agent, "JobResearchLLM", _FakeRevisionLLM)
 
 
 def _orchestrator(tmp_path):
