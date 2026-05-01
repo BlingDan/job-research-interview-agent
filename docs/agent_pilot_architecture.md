@@ -29,6 +29,9 @@ lark-cli event +subscribe
 TaskMessageService
         |
         v
+IntentRouterAgent
+        |
+        v
 AgentPilotOrchestrator
         |
         +--> PlannerAgent
@@ -50,7 +53,8 @@ FeishuToolLayer
 
 | Module | Responsibility |
 | --- | --- |
-| `TaskMessageService` | Parses Feishu IM events and commands such as `确认`, `当前进度`, `修改：...`, `/reset`, and `/help`. |
+| `TaskMessageService` | Extracts Feishu IM text and message metadata, then delegates command classification to `IntentRouterAgent`. |
+| `IntentRouterAgent` | Routes hard commands and natural-language artifact revisions into structured decisions with target artifacts, confidence, and clarification flags. |
 | `AgentPilotOrchestrator` | Owns the task lifecycle, state transitions, progress replies, artifact generation, and final delivery. |
 | `PlannerAgent` | Converts the user goal into a plan, `ArtifactBrief`, and `ToolPlan`. |
 | `DocAgent` | Generates the proposal document content. |
@@ -100,9 +104,17 @@ LARK_ARTIFACT_MODE=real
 FEISHU_TOOL_MODE=hybrid
 FEISHU_MCP_MODE=real
 AGENT_PILOT_PLANNER_MODE=auto
+AGENT_PILOT_ROUTER_MODE=auto
 AGENT_PILOT_AUTO_CONFIRM=true
+FEISHU_TOOL_ADAPTER_TIMEOUT_SECONDS=25
 LARK_STREAM_DELAY_SECONDS=0.2
 ```
+
+`scripts/lark_event_listener.py` runs auto-confirmed generation in a background
+thread for Feishu IM. This keeps `/status`, `/reset`, and revision messages
+responsive while Doc, Slides, or Canvas generation is still running. Each
+Feishu tool adapter also has a hard timeout (`FEISHU_TOOL_ADAPTER_TIMEOUT_SECONDS`)
+before the tool layer records the failure and moves to the next fallback.
 
 ## MCP Integration
 
@@ -150,9 +162,12 @@ Useful IM commands:
 确认
 当前进度
 修改：PPT 更突出工程实现和多端协同
+在 Agent-Pilot 参赛方案最后一行添加当前时间
 ```
 
 `/reset` clears the active task binding for the current chat without deleting historical artifacts, which is useful for repeated live demos.
+
+Natural revision messages do not have to start with `修改：`. The router can map artifact language such as `参赛方案`, `PPT`, `汇报材料`, `架构图`, or `画板` to Doc, Slides, or Canvas. If the target is ambiguous, the orchestrator asks for clarification instead of regenerating every artifact.
 
 ## Artifact Alignment
 

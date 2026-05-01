@@ -1,11 +1,16 @@
 from app.agents.planner_agent import build_fallback_plan
 from app.schemas.agent_pilot import AgentPilotTask, ArtifactRef, RevisionRecord
 from app.services.delivery_service import (
+    FALLBACK_NOTICE,
     format_final_reply,
+    format_help_reply,
     format_plan_reply_chunks,
     format_plan_reply,
     format_progress_reply,
+    format_reset_confirm_reply,
+    format_reset_expired_reply,
     format_revision_reply,
+    with_fallback_notice,
 )
 
 
@@ -69,3 +74,55 @@ def test_revision_reply_mentions_targets():
 
     assert "slides" in reply
     assert "PPT" in reply
+
+
+def test_help_reply_mentions_natural_revision_language():
+    reply = format_help_reply()
+
+    assert "不加「修改：」" in reply
+
+
+def test_reset_confirm_reply_includes_plan_summary_and_confirm_reset():
+    task = AgentPilotTask(
+        task_id="task-1",
+        input_text="生成方案",
+        plan=build_fallback_plan("生成方案"),
+        status="WAITING_CONFIRMATION",
+    )
+
+    reply = format_reset_confirm_reply(task)
+
+    assert "确认重置" in reply
+    assert "WAITING_CONFIRMATION" in reply
+
+
+def test_reset_expired_reply_mentions_expired():
+    reply = format_reset_expired_reply()
+
+    assert "已过期" in reply
+
+
+def test_with_fallback_notice_prepends_warning():
+    reply = with_fallback_notice("任务已完成，成果如下：", "fallback")
+
+    assert reply.startswith(FALLBACK_NOTICE)
+    assert "任务已完成" in reply
+
+
+def test_with_fallback_notice_passes_through_for_llm():
+    reply = with_fallback_notice("任务已完成，成果如下：", "llm")
+
+    assert FALLBACK_NOTICE not in reply
+    assert reply == "任务已完成，成果如下："
+
+
+def test_with_fallback_notice_passes_through_for_hard_command():
+    reply = with_fallback_notice("在线", "hard_command")
+
+    assert FALLBACK_NOTICE not in reply
+
+
+def test_with_fallback_notice_passes_through_for_none():
+    reply = with_fallback_notice("在线", None)
+
+    assert FALLBACK_NOTICE not in reply

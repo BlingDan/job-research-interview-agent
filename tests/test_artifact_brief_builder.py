@@ -14,12 +14,13 @@ def test_artifact_brief_covers_official_a_to_f_requirements():
 
     assert set(brief.official_requirement_mapping) == {"A", "B", "C", "D", "E", "F"}
     assert any("Agent 编排" in item for item in brief.must_have_points)
+    assert any("IntentRouterAgent" in item for item in brief.agent_architecture)
     assert any("多端" in item for item in brief.multi_end_collaboration_story)
     assert any("飞书" in item for item in brief.feishu_suite_linkage)
     assert any("确认" in item for item in brief.demo_script)
 
 
-def test_artifact_brief_includes_revision_context():
+def test_artifact_brief_does_not_treat_revision_text_as_content_patch():
     task = AgentPilotTask(
         task_id="task-1",
         input_text="生成参赛方案",
@@ -37,4 +38,5 @@ def test_artifact_brief_includes_revision_context():
     brief = build_artifact_brief(task)
 
     assert any("工程实现" in item for item in brief.must_have_points)
-    assert any("修改：PPT" in item for item in brief.risk_and_fallback_story)
+    assert not any("修改：PPT" in item for item in brief.must_have_points)
+    assert not any("修改：PPT" in item for item in brief.risk_and_fallback_story)

@@ -57,3 +57,37 @@ class ArtifactFallbackLarkClient:
             artifact = self.fallback.create_canvas(task_id, title, mermaid, task_dir)
             artifact.summary = f"{artifact.summary} 真实飞书创建失败，已使用 fallback：{exc}"
             return artifact
+
+    def update_doc(
+        self, task_id: str, artifact: ArtifactRef, content: str, task_dir: Path
+    ) -> ArtifactRef:
+        try:
+            return self.primary.update_doc(task_id, artifact, content, task_dir)
+        except Exception as exc:
+            updated = self.fallback.update_doc(task_id, artifact, content, task_dir)
+            updated.summary = f"{updated.summary} 真实飞书更新失败，已使用 fallback：{exc}"
+            return updated
+
+    def update_slides(
+        self,
+        task_id: str,
+        artifact: ArtifactRef,
+        slides: list[dict[str, str]],
+        task_dir: Path,
+    ) -> ArtifactRef:
+        try:
+            return self.primary.update_slides(task_id, artifact, slides, task_dir)
+        except Exception as exc:
+            updated = self.fallback.update_slides(task_id, artifact, slides, task_dir)
+            updated.summary = f"{updated.summary} 真实飞书更新失败，已使用 fallback：{exc}"
+            return updated
+
+    def update_canvas(
+        self, task_id: str, artifact: ArtifactRef, mermaid: str, task_dir: Path
+    ) -> ArtifactRef:
+        try:
+            return self.primary.update_canvas(task_id, artifact, mermaid, task_dir)
+        except Exception as exc:
+            updated = self.fallback.update_canvas(task_id, artifact, mermaid, task_dir)
+            updated.summary = f"{updated.summary} 真实飞书更新失败，已使用 fallback：{exc}"
+            return updated

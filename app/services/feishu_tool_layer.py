@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import queue
+import threading
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
@@ -126,8 +128,14 @@ class LarkCliToolAdapter:
 
 
 class FeishuToolLayer:
-    def __init__(self, adapters: dict[str, FeishuToolAdapter]):
+    def __init__(
+        self,
+        adapters: dict[str, FeishuToolAdapter],
+        *,
+        adapter_timeout_seconds: float = 25.0,
+    ):
         self.adapters = adapters
+        self.adapter_timeout_seconds = max(adapter_timeout_seconds, 0.0)
 
     def execute_artifact(
         self,
@@ -151,12 +159,14 @@ class FeishuToolLayer:
 
             started_at = utc_now()
             try:
-                artifact = adapter.execute_artifact(
+                artifact = _execute_adapter_with_timeout(
+                    adapter,
                     call,
                     task_id=task_id,
                     title=title,
                     content=content,
                     task_dir=task_dir,
+                    timeout_seconds=self.adapter_timeout_seconds,
                 )
             except Exception as exc:
                 last_error = exc
@@ -186,6 +196,60 @@ class FeishuToolLayer:
             return artifact, records
 
         raise RuntimeError(f"All adapters failed for {call.capability}: {last_error}")
+
+
+def _execute_adapter_with_timeout(
+    adapter: FeishuToolAdapter,
+    call: ToolCallPlan,
+    *,
+    task_id: str,
+    title: str,
+    content: object,
+    task_dir: Path,
+    timeout_seconds: float,
+) -> ArtifactRef:
+    if timeout_seconds <= 0:
+        return adapter.execute_artifact(
+            call,
+            task_id=task_id,
+            title=title,
+            content=content,
+            task_dir=task_dir,
+        )
+
+    result_queue: queue.Queue[tuple[str, ArtifactRef | Exception]] = queue.Queue(maxsize=1)
+
+    def _run() -> None:
+        try:
+            artifact = adapter.execute_artifact(
+                call,
+                task_id=task_id,
+                title=title,
+                content=content,
+                task_dir=task_dir,
+            )
+        except Exception as exc:
+            result_queue.put(("error", exc))
+            return
+        result_queue.put(("ok", artifact))
+
+    thread = threading.Thread(
+        target=_run,
+        name=f"agent-pilot-{adapter.name}-{call.capability}",
+        daemon=True,
+    )
+    thread.start()
+    try:
+        status, value = result_queue.get(timeout=timeout_seconds)
+    except queue.Empty as exc:
+        raise TimeoutError(
+            f"Adapter {adapter.name} timed out after {timeout_seconds:.1f}s "
+            f"while executing {call.capability}."
+        ) from exc
+
+    if status == "error":
+        raise value
+    return value  # type: ignore[return-value]
 
 
 def _adapter_order(call: ToolCallPlan) -> list[str]:

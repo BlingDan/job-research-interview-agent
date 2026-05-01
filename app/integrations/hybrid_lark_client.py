@@ -40,3 +40,22 @@ class HybridLarkClient:
         self, task_id: str, title: str, mermaid: str, task_dir: Path
     ) -> ArtifactRef:
         return self.artifact_client.create_canvas(task_id, title, mermaid, task_dir)
+
+    def update_doc(
+        self, task_id: str, artifact: ArtifactRef, content: str, task_dir: Path
+    ) -> ArtifactRef:
+        return self.artifact_client.update_doc(task_id, artifact, content, task_dir)
+
+    def update_slides(
+        self,
+        task_id: str,
+        artifact: ArtifactRef,
+        slides: list[dict[str, str]],
+        task_dir: Path,
+    ) -> ArtifactRef:
+        return self.artifact_client.update_slides(task_id, artifact, slides, task_dir)
+
+    def update_canvas(
+        self, task_id: str, artifact: ArtifactRef, mermaid: str, task_dir: Path
+    ) -> ArtifactRef:
+        return self.artifact_client.update_canvas(task_id, artifact, mermaid, task_dir)

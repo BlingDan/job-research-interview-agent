@@ -1,7 +1,9 @@
 from pathlib import Path
+import time
 
 from app.integrations.fake_lark_client import FakeLarkClient
 from app.integrations.feishu_mcp_client import McpToolInfo, McpToolResult
+from app.schemas.agent_pilot import ArtifactRef
 from app.schemas.agent_pilot import ToolCallPlan
 from app.services.feishu_tool_layer import (
     FeishuMcpToolAdapter,
@@ -392,3 +394,43 @@ def test_tool_layer_uses_fake_when_cli_fails(tmp_path):
 
     assert artifact.url == "https://fake.feishu.local/doc/task-1"
     assert [record.status for record in records] == ["fallback", "succeeded"]
+
+
+def test_tool_layer_times_out_stuck_adapter_and_uses_fallback(tmp_path):
+    class StuckAdapter:
+        name = "mcp"
+
+        def execute_artifact(self, call, *, task_id, title, content, task_dir):
+            time.sleep(0.2)
+            return ArtifactRef(
+                artifact_id="late-doc",
+                kind="doc",
+                title=title,
+                url="https://late.example/doc",
+                status="created",
+            )
+
+    layer = FeishuToolLayer(
+        adapters={
+            "mcp": StuckAdapter(),
+            "fake": LarkCliToolAdapter(FakeLarkClient()),
+        },
+        adapter_timeout_seconds=0.03,
+    )
+    started = time.perf_counter()
+
+    artifact, records = layer.execute_artifact(
+        _doc_call(preferred_adapter="mcp"),
+        task_id="task-1",
+        title="Agent-Pilot 鍙傝禌鏂规",
+        content="# doc",
+        task_dir=tmp_path,
+    )
+
+    assert time.perf_counter() - started < 0.15
+    assert artifact.url == "https://fake.feishu.local/doc/task-1"
+    assert records[0].adapter == "mcp"
+    assert records[0].status == "fallback"
+    assert "timed out" in records[0].error
+    assert records[-1].adapter == "fake"
+    assert records[-1].status == "succeeded"

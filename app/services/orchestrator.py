@@ -1,12 +1,25 @@
 from __future__ import annotations
 
+import json
+import threading
 import time
 import uuid
+from datetime import datetime, timezone
+from pathlib import Path
 
 from app.agents.canvas_agent import build_canvas_artifact
 from app.agents.doc_agent import build_doc_artifact
+from app.agents.intent_router_agent import route_agent_pilot_message
 from app.agents.planner_agent import build_agent_plan
 from app.agents.presentation_agent import build_slide_artifact
+from app.agents.artifact_revision_agent import (
+    ArtifactRevisionPatch,
+    apply_canvas_patch,
+    apply_doc_patch,
+    apply_slides_patch,
+    build_artifact_revision_patch,
+    build_llm_revision_content,
+)
 from app.integrations.fake_lark_client import FakeLarkClient
 from app.integrations.lark_client import LarkClient
 from app.schemas.agent_pilot import (
@@ -14,6 +27,7 @@ from app.schemas.agent_pilot import (
     AgentPilotResponse,
     AgentPilotTask,
     ArtifactKind,
+    ArtifactRef,
     RevisionRecord,
     TaskCreateRequest,
 )
@@ -27,8 +41,12 @@ from app.services.delivery_service import (
     format_plan_reply,
     format_planning_ack,
     format_progress_reply,
+    format_reset_confirm_reply,
+    format_reset_expired_reply,
     format_reset_reply,
+    format_revision_clarification_reply,
     format_revision_reply,
+    with_fallback_notice,
 )
 from app.services.feishu_tool_layer import FeishuMcpToolAdapter, FeishuToolLayer, LarkCliToolAdapter
 from app.services.feishu_tool_registry import find_tool_call
@@ -43,12 +61,14 @@ class AgentPilotOrchestrator:
         *,
         stream_delay_seconds: float = 0.0,
         auto_confirm: bool = False,
+        background_auto_confirm: bool = False,
         tool_layer: FeishuToolLayer | None = None,
     ):
         self.state_service = state_service
         self.lark_client = lark_client
         self.stream_delay_seconds = max(stream_delay_seconds, 0.0)
         self.auto_confirm = auto_confirm
+        self.background_auto_confirm = background_auto_confirm
         self.tool_layer = tool_layer or FeishuToolLayer(
             adapters={
                 "mcp": FeishuMcpToolAdapter(mode="off"),
@@ -57,7 +77,9 @@ class AgentPilotOrchestrator:
             }
         )
 
-    def create_task(self, request: TaskCreateRequest) -> AgentPilotResponse:
+    def create_task(
+        self, request: TaskCreateRequest, *, route_source: str | None = None
+    ) -> AgentPilotResponse:
         task = AgentPilotTask(
             task_id=str(uuid.uuid4()),
             input_text=request.message,
@@ -71,7 +93,7 @@ class AgentPilotOrchestrator:
             stream_message_id = self._send_planning_ack(task)
             task.plan = build_agent_plan(request.message)
             self.state_service.update_status(task, "WAITING_CONFIRMATION")
-            reply = format_plan_reply(task)
+            reply = with_fallback_notice(format_plan_reply(task), route_source)
             self._send_or_reply_stream(
                 task,
                 format_plan_reply_chunks(task),
@@ -83,6 +105,9 @@ class AgentPilotOrchestrator:
                     task,
                     "已进入自动执行模式，我会继续生成 Doc、Slides 和 Canvas，并在完成后把链接发回当前 IM。",
                 )
+                if self.background_auto_confirm:
+                    self._start_background_confirm(task.task_id)
+                    return self._response(task, format_progress_reply(task))
                 return self._run_confirmed_task(task)
             return self._response(task, reply)
         except Exception as exc:
@@ -102,6 +127,31 @@ class AgentPilotOrchestrator:
             reply = format_error_reply(task)
             self._send_or_reply(task, reply)
             return self._response(task, reply)
+
+    def _start_background_confirm(self, task_id: str) -> None:
+        thread = threading.Thread(
+            target=self._run_confirmed_task_in_background,
+            args=(task_id,),
+            name=f"agent-pilot-confirm-{task_id}",
+            daemon=True,
+        )
+        thread.start()
+
+    def _run_confirmed_task_in_background(self, task_id: str) -> None:
+        task: AgentPilotTask | None = None
+        try:
+            task = self.state_service.load_task(task_id)
+            self._run_confirmed_task(task)
+        except Exception as exc:
+            if task is None:
+                try:
+                    task = self.state_service.load_task(task_id)
+                except Exception:
+                    return
+            task.error = str(exc)
+            self.state_service.update_status(task, "FAILED")
+            reply = format_error_reply(task)
+            self._send_or_reply(task, reply)
 
     def _run_confirmed_task(self, task: AgentPilotTask) -> AgentPilotResponse:
         if task.status == "DONE":
@@ -150,22 +200,72 @@ class AgentPilotOrchestrator:
         self._send_or_reply(task, reply)
         return self._response(task, reply)
 
-    def revise_task(self, task_id: str, instruction: str) -> AgentPilotResponse:
+    def revise_task(
+        self,
+        task_id: str,
+        instruction: str,
+        *,
+        target_artifacts: list[ArtifactKind] | None = None,
+        needs_clarification: bool = False,
+        route_reason: str = "",
+        route_source: str | None = None,
+    ) -> AgentPilotResponse:
         task = self.state_service.load_task(task_id)
         try:
             self.state_service.update_status(task, "REVISING")
-            targets = self._target_artifacts(instruction)
+            targets = target_artifacts if target_artifacts is not None else self._target_artifacts(instruction)
+            if needs_clarification or not targets:
+                self.state_service.update_status(task, "DONE")
+                reply = with_fallback_notice(
+                    format_revision_clarification_reply(task, instruction), route_source
+                )
+                self._send_or_reply(task, reply)
+                return self._response(task, reply)
+
+            used_fallback = False
+            summaries: list[str] = []
+            for target in targets:
+                current = self._read_artifact_content(task, target)
+                if current is None:
+                    current = self._regenerate_content(task, target)
+
+                rewritten, change_summary = None, ""
+                try:
+                    rewritten, change_summary = build_llm_revision_content(
+                        instruction, current, target
+                    )
+                except Exception:
+                    used_fallback = True
+
+                if rewritten is not None:
+                    try:
+                        self._overwrite_artifact_content(task, target, rewritten)
+                        summaries.append(change_summary or f"已重写 {target} 内容。")
+                        continue
+                    except Exception:
+                        used_fallback = True
+
+                patch = build_artifact_revision_patch(instruction, target)
+                if patch.needs_clarification:
+                    self.state_service.update_status(task, "DONE")
+                    reply = with_fallback_notice(
+                        format_revision_clarification_reply(task, instruction), route_source
+                    )
+                    self._send_or_reply(task, reply)
+                    return self._response(task, reply)
+                self._apply_single_patch(task, patch)
+                summaries.append(_single_patch_summary(patch))
+
+            effective_source = "fallback" if used_fallback else (route_source or "llm")
             revision = RevisionRecord(
                 revision_id=str(uuid.uuid4()),
                 instruction=instruction,
                 target_artifacts=targets,
-                summary="已根据修改意见重新生成相关产物。",
+                summary=route_reason or "；".join(summaries),
             )
             task.revisions.append(revision)
-            task.artifact_brief = build_artifact_brief(task)
-            self._regenerate_targets(task, targets)
             self.state_service.update_status(task, "DONE")
-            reply = format_revision_reply(task, revision)
+            reply = with_fallback_notice(format_revision_reply(task, revision), effective_source)
             self._send_or_reply(task, reply)
             return self._response(task, reply)
         except Exception as exc:
@@ -175,11 +275,72 @@ class AgentPilotOrchestrator:
             self._send_or_reply(task, reply)
             return self._response(task, reply)
 
+    def _overwrite_artifact_content(
+        self, task: AgentPilotTask, kind: ArtifactKind, content: str
+    ) -> None:
+        task_dir = self.state_service.task_dir(task.task_id)
+        existing = _artifact_by_kind(task.artifacts, kind)
+        if kind == "doc":
+            artifact = self.lark_client.update_doc(task.task_id, existing, content, task_dir)
+        elif kind == "slides":
+            slides_data = json.loads(content)
+            artifact = self.lark_client.update_slides(task.task_id, existing, slides_data, task_dir)
+        else:
+            artifact = self.lark_client.update_canvas(task.task_id, existing, content, task_dir)
+        _replace_artifact(task, artifact)
+
+    def _read_artifact_content(self, task: AgentPilotTask, kind: ArtifactKind) -> str | None:
+        existing = _artifact_by_kind(task.artifacts, kind)
+        if kind == "slides":
+            slides = _read_slides_artifact(existing)
+            if slides is None:
+                return None
+            return json.dumps(slides, ensure_ascii=False, indent=2)
+        return _read_text_artifact(existing)
+
+    def _regenerate_content(self, task: AgentPilotTask, kind: ArtifactKind) -> str:
+        if kind == "doc":
+            return build_doc_artifact(task)
+        if kind == "slides":
+            return json.dumps(build_slide_artifact(task), ensure_ascii=False, indent=2)
+        return build_canvas_artifact(task)
+
+    def _apply_single_patch(self, task: AgentPilotTask, patch: ArtifactRevisionPatch) -> None:
+        task_dir = self.state_service.task_dir(task.task_id)
+        existing = _artifact_by_kind(task.artifacts, patch.target_artifact)
+        if patch.target_artifact == "doc":
+            content = _read_text_artifact(existing) or build_doc_artifact(task)
+            updated_content = apply_doc_patch(content, patch)
+            if existing:
+                artifact = self.lark_client.update_doc(task.task_id, existing, updated_content, task_dir)
+            else:
+                self._execute_artifact(task, "create_doc", "Agent-Pilot 参赛方案", updated_content)
+                return
+        elif patch.target_artifact == "slides":
+            slides = _read_slides_artifact(existing) or build_slide_artifact(task)
+            updated_slides = apply_slides_patch(slides, patch)
+            if existing:
+                artifact = self.lark_client.update_slides(task.task_id, existing, updated_slides, task_dir)
+            else:
+                self._execute_artifact(task, "create_slides", "Agent-Pilot 5 页答辩汇报材料", updated_slides)
+                return
+        else:
+            mermaid = _read_text_artifact(existing) or build_canvas_artifact(task)
+            updated_mermaid = apply_canvas_patch(mermaid, patch)
+            if existing:
+                artifact = self.lark_client.update_canvas(task.task_id, existing, updated_mermaid, task_dir)
+            else:
+                self._execute_artifact(task, "create_canvas", "Agent-Pilot 编排架构画板", updated_mermaid)
+                return
+        _replace_artifact(task, artifact)
+
     def handle_command(self, command: AgentPilotCommand) -> AgentPilotResponse | None:
         if command.type == "help":
             self._send_command_reply(command, format_help_reply())
             return None
         if command.type == "reset":
+            return self._handle_reset(command)
+        if command.type == "confirm_reset":
             if command.chat_id:
                 self.state_service.clear_active_task(command.chat_id)
             self._send_command_reply(command, format_reset_reply())
@@ -194,13 +355,14 @@ class AgentPilotOrchestrator:
                     chat_id=command.chat_id,
                     message_id=command.message_id,
                     user_id=command.user_id,
-                )
+                ),
+                route_source=command.route_source,
             )
         if not command.chat_id and not command.task_id:
             return None
         task_id = command.task_id or self.state_service.get_active_task_id(command.chat_id or "")
         if not task_id:
-            if command.type in {"confirm", "progress", "revise"}:
+            if command.type in {"confirm", "confirm_reset", "progress", "revise"}:
                 self._send_command_reply(command, format_no_active_task_reply())
             return None
         if command.type == "confirm":
@@ -208,7 +370,37 @@ class AgentPilotOrchestrator:
         if command.type == "progress":
             return self.get_progress(task_id)
         if command.type == "revise":
-            return self.revise_task(task_id, command.text)
+            route_has_metadata = bool(
+                command.target_artifacts
+                or command.needs_clarification
+                or command.route_confidence
+                or command.route_reason
+            )
+            return self.revise_task(
+                task_id,
+                command.text,
+                target_artifacts=command.target_artifacts if route_has_metadata else None,
+                needs_clarification=command.needs_clarification,
+                route_reason=command.route_reason,
+                route_source=command.route_source,
+            )
+        return None
+
+    def _handle_reset(self, command: AgentPilotCommand) -> AgentPilotResponse | None:
+        if command.chat_id:
+            task_id = self.state_service.get_active_task_id(command.chat_id)
+            if task_id:
+                task = self.state_service.load_task(task_id)
+                if command.event_time is not None:
+                    task_created = _parse_iso_to_float_s(task.created_at)
+                    if task_created is not None and task_created > command.event_time:
+                        self._send_command_reply(command, format_reset_expired_reply())
+                        return None
+                self._send_command_reply(command, format_reset_confirm_reply(task))
+                return None
+            self._send_command_reply(command, format_no_active_task_reply())
+            return None
+        self._send_command_reply(command, format_reset_reply())
         return None
 
     def _send_command_reply(self, command: AgentPilotCommand, text: str) -> None:
@@ -234,6 +426,59 @@ class AgentPilotOrchestrator:
             self._execute_artifact(task, "create_canvas", "Agent-Pilot 编排架构画板", build_canvas_artifact(task))
         self.state_service.save_task(task)
 
+    def _apply_revision_patches(
+        self, task: AgentPilotTask, patches: list[ArtifactRevisionPatch]
+    ) -> None:
+        task_dir = self.state_service.task_dir(task.task_id)
+        for patch in patches:
+            existing = _artifact_by_kind(task.artifacts, patch.target_artifact)
+            if patch.target_artifact == "doc":
+                content = _read_text_artifact(existing) or build_doc_artifact(task)
+                updated_content = apply_doc_patch(content, patch)
+                if existing:
+                    artifact = self.lark_client.update_doc(
+                        task.task_id, existing, updated_content, task_dir
+                    )
+                    _replace_artifact(task, artifact)
+                else:
+                    self._execute_artifact(
+                        task,
+                        "create_doc",
+                        "Agent-Pilot 参赛方案",
+                        updated_content,
+                    )
+            elif patch.target_artifact == "slides":
+                slides = _read_slides_artifact(existing) or build_slide_artifact(task)
+                updated_slides = apply_slides_patch(slides, patch)
+                if existing:
+                    artifact = self.lark_client.update_slides(
+                        task.task_id, existing, updated_slides, task_dir
+                    )
+                    _replace_artifact(task, artifact)
+                else:
+                    self._execute_artifact(
+                        task,
+                        "create_slides",
+                        "Agent-Pilot 5 页答辩汇报材料",
+                        updated_slides,
+                    )
+            else:
+                mermaid = _read_text_artifact(existing) or build_canvas_artifact(task)
+                updated_mermaid = apply_canvas_patch(mermaid, patch)
+                if existing:
+                    artifact = self.lark_client.update_canvas(
+                        task.task_id, existing, updated_mermaid, task_dir
+                    )
+                    _replace_artifact(task, artifact)
+                else:
+                    self._execute_artifact(
+                        task,
+                        "create_canvas",
+                        "Agent-Pilot 编排架构画板",
+                        updated_mermaid,
+                    )
+        self.state_service.save_task(task)
+
     def _execute_artifact(
         self,
         task: AgentPilotTask,
@@ -253,15 +498,8 @@ class AgentPilotOrchestrator:
         task.tool_executions.extend(records)
 
     def _target_artifacts(self, instruction: str) -> list[ArtifactKind]:
-        text = instruction.lower()
-        targets: list[ArtifactKind] = []
-        if any(key in text for key in ["doc", "文档", "方案"]):
-            targets.append("doc")
-        if any(key in text for key in ["ppt", "slides", "汇报", "答辩", "演示"]):
-            targets.append("slides")
-        if any(key in text for key in ["canvas", "whiteboard", "画板", "架构图", "流程图"]):
-            targets.append("canvas")
-        return targets or ["doc", "slides", "canvas"]
+        route = route_agent_pilot_message(instruction)
+        return route.target_artifacts
 
     def _send_or_reply(self, task: AgentPilotTask, text: str) -> None:
         if task.message_id:
@@ -367,3 +605,65 @@ def _capability_for_kind(kind: ArtifactKind) -> str:
     if kind == "slides":
         return "create_slides"
     return "create_canvas"
+
+
+def _artifact_by_kind(
+    artifacts: list[ArtifactRef], kind: ArtifactKind
+) -> ArtifactRef | None:
+    for artifact in artifacts:
+        if artifact.kind == kind:
+            return artifact
+    return None
+
+
+def _replace_artifact(task: AgentPilotTask, updated: ArtifactRef) -> None:
+    for index, artifact in enumerate(task.artifacts):
+        if artifact.kind == updated.kind:
+            task.artifacts[index] = updated
+            return
+    task.artifacts.append(updated)
+
+
+def _read_text_artifact(artifact: ArtifactRef | None) -> str | None:
+    if not artifact or not artifact.local_path:
+        return None
+    path = Path(artifact.local_path)
+    if not path.exists():
+        return None
+    return path.read_text(encoding="utf-8")
+
+
+def _read_slides_artifact(artifact: ArtifactRef | None) -> list[dict[str, str]] | None:
+    text = _read_text_artifact(artifact)
+    if not text:
+        return None
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(value, list):
+        return None
+    slides: list[dict[str, str]] = []
+    for item in value:
+        if isinstance(item, dict):
+            slides.append({str(key): str(value or "") for key, value in item.items()})
+    return slides or None
+
+
+def _single_patch_summary(patch: ArtifactRevisionPatch) -> str:
+    return f"{patch.target_artifact}: {patch.operation} {patch.location}"
+
+
+def _patch_summary(patches: list[ArtifactRevisionPatch]) -> str:
+    details = [
+        f"{patch.target_artifact}: {patch.operation} {patch.location}"
+        for patch in patches
+    ]
+    return "已原地应用结构化修改补丁：" + "；".join(details)
+
+
+def _parse_iso_to_float_s(iso_str: str) -> float | None:
+    try:
+        return datetime.fromisoformat(iso_str).timestamp()
+    except (ValueError, TypeError):
+        return None

@@ -8,6 +8,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 os.environ.setdefault("AGENT_PILOT_PLANNER_MODE", "fallback")
+os.environ.setdefault("AGENT_PILOT_ROUTER_MODE", "fallback")
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))

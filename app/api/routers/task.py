@@ -20,7 +20,7 @@ from app.services.state_service import StateService
 router = APIRouter(tags=["tasks"])
 
 
-def build_orchestrator() -> AgentPilotOrchestrator:
+def build_orchestrator(*, background_auto_confirm: bool | None = None) -> AgentPilotOrchestrator:
     settings = get_settings()
     state_service = StateService(settings.workspace_root)
     im_mode = settings.lark_im_mode or settings.lark_mode
@@ -46,6 +46,11 @@ def build_orchestrator() -> AgentPilotOrchestrator:
         lark_client,
         stream_delay_seconds=getattr(settings, "lark_stream_delay_seconds", 0.0),
         auto_confirm=getattr(settings, "agent_pilot_auto_confirm", False),
+        background_auto_confirm=(
+            getattr(settings, "agent_pilot_background_auto_confirm", False)
+            if background_auto_confirm is None
+            else background_auto_confirm
+        ),
         tool_layer=_build_tool_layer(
             getattr(settings, "feishu_tool_mode", "hybrid"),
             getattr(settings, "feishu_mcp_mode", "off"),
@@ -60,6 +65,7 @@ def build_orchestrator() -> AgentPilotOrchestrator:
             getattr(settings, "feishu_mcp_timeout_seconds", 20.0),
             getattr(settings, "feishu_mcp_token_mode", "user_access_token"),
             getattr(settings, "feishu_mcp_use_uat", True),
+            getattr(settings, "feishu_tool_adapter_timeout_seconds", 25.0),
             lark_client,
         ),
     )
@@ -83,6 +89,7 @@ def _build_tool_layer(
     mcp_timeout_seconds: float,
     mcp_token_mode: str,
     mcp_use_uat: bool,
+    adapter_timeout_seconds: float,
     lark_client: LarkClient,
 ) -> FeishuToolLayer:
     mcp_client = None
@@ -105,17 +112,27 @@ def _build_tool_layer(
     fake_adapter = LarkCliToolAdapter(FakeLarkClient())
 
     if tool_mode == "mcp":
-        return FeishuToolLayer({"mcp": mcp_adapter, "fake": fake_adapter})
+        return FeishuToolLayer(
+            {"mcp": mcp_adapter, "fake": fake_adapter},
+            adapter_timeout_seconds=adapter_timeout_seconds,
+        )
     if tool_mode == "lark_cli":
-        return FeishuToolLayer({"lark_cli": lark_adapter, "fake": fake_adapter})
+        return FeishuToolLayer(
+            {"lark_cli": lark_adapter, "fake": fake_adapter},
+            adapter_timeout_seconds=adapter_timeout_seconds,
+        )
     if tool_mode == "fake":
-        return FeishuToolLayer({"fake": fake_adapter})
+        return FeishuToolLayer(
+            {"fake": fake_adapter},
+            adapter_timeout_seconds=adapter_timeout_seconds,
+        )
     return FeishuToolLayer(
         {
             "mcp": mcp_adapter,
             "lark_cli": lark_adapter,
             "fake": fake_adapter,
-        }
+        },
+        adapter_timeout_seconds=adapter_timeout_seconds,
     )
 
 

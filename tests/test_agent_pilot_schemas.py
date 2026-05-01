@@ -27,6 +27,23 @@ def test_artifact_ref_supports_fake_doc():
 
     assert artifact.kind == "doc"
     assert artifact.status == "fake"
+    assert artifact.metadata == {}
+
+
+def test_artifact_ref_persists_update_metadata():
+    artifact = ArtifactRef(
+        artifact_id="artifact-1",
+        kind="slides",
+        title="Agent-Pilot 答辩材料",
+        status="created",
+        token="slides-token",
+        metadata={"slide_ids": ["slide-1", "slide-2"], "source_format": "json"},
+    )
+
+    restored = ArtifactRef.model_validate(artifact.model_dump())
+
+    assert restored.metadata["slide_ids"] == ["slide-1", "slide-2"]
+    assert restored.metadata["source_format"] == "json"
 
 
 def test_tool_plan_models_agent_visible_feishu_tool_choice():

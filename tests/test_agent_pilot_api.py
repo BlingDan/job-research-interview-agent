@@ -1,3 +1,5 @@
+import json
+
 from fastapi.testclient import TestClient
 
 from app.api.routers import task as task_router
@@ -14,6 +16,20 @@ from app.services.state_service import StateService
 def test_agent_pilot_task_api_flow(tmp_path, monkeypatch):
     def _build_orchestrator():
         return AgentPilotOrchestrator(StateService(tmp_path), FakeLarkClient())
+
+    # Avoid real LLM calls in the router
+    monkeypatch.setenv("AGENT_PILOT_ROUTER_MODE", "fallback")
+    # Avoid real LLM calls in the revision content builder
+    from app.agents import artifact_revision_agent
+
+    class FakeRevisionLLM:
+        def __init__(self, **kwargs):
+            pass
+
+        def invoke(self, messages):
+            return json.dumps({"content": "# 标题\n更新后的内容", "change_summary": "已更新文档内容"})
+
+    monkeypatch.setattr(artifact_revision_agent, "JobResearchLLM", FakeRevisionLLM)
 
     monkeypatch.setattr(task_router, "build_orchestrator", _build_orchestrator)
     client = TestClient(app)

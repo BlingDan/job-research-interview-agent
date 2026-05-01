@@ -10,7 +10,10 @@ def test_agent_pilot_config_defaults():
     assert settings.lark_stream_delay_seconds == 0.0
     assert settings.agent_pilot_default_chat_id is None
     assert settings.agent_pilot_auto_confirm is False
+    assert settings.agent_pilot_background_auto_confirm is False
     assert settings.agent_pilot_planner_mode == "fallback"
+    assert settings.agent_pilot_router_mode == "fallback"
+    assert settings.agent_pilot_router_timeout_seconds == 15.0
     assert settings.feishu_tool_mode == "hybrid"
     assert settings.feishu_mcp_mode == "off"
     assert settings.feishu_mcp_app_id == ""
@@ -20,6 +23,7 @@ def test_agent_pilot_config_defaults():
     assert settings.feishu_mcp_timeout_seconds == 20.0
     assert settings.feishu_mcp_token_mode == "user_access_token"
     assert settings.feishu_mcp_use_uat is True
+    assert settings.feishu_tool_adapter_timeout_seconds == 25.0
     assert settings.workspace_root == "workspace"
 
 

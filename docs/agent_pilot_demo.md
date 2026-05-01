@@ -93,6 +93,7 @@ $env:LARK_ARTIFACT_MODE="fake"
 $env:FEISHU_TOOL_MODE="hybrid"
 $env:FEISHU_MCP_MODE="off"
 $env:AGENT_PILOT_PLANNER_MODE="auto"
+$env:AGENT_PILOT_ROUTER_MODE="auto"
 $env:LARK_STREAM_DELAY_SECONDS="0.2"
 uv run python scripts/lark_event_listener.py
 ```
@@ -105,6 +106,7 @@ $env:LARK_ARTIFACT_MODE="real"
 $env:FEISHU_TOOL_MODE="hybrid"
 $env:FEISHU_MCP_MODE="off"
 $env:AGENT_PILOT_PLANNER_MODE="auto"
+$env:AGENT_PILOT_ROUTER_MODE="auto"
 $env:LARK_STREAM_DELAY_SECONDS="0.2"
 uv run python scripts/lark_event_listener.py
 ```
@@ -146,11 +148,19 @@ $env:FEISHU_MCP_TOOLS="docx.builtin.import,docx.v1.document.rawContent,docx.buil
 $env:FEISHU_MCP_TOKEN_MODE="user_access_token"
 $env:FEISHU_MCP_USE_UAT="true"
 $env:AGENT_PILOT_PLANNER_MODE="auto"
+$env:AGENT_PILOT_ROUTER_MODE="auto"
 $env:AGENT_PILOT_AUTO_CONFIRM="true"
+$env:FEISHU_TOOL_ADAPTER_TIMEOUT_SECONDS="25"
 uv run python scripts/lark_event_listener.py
 ```
 
 In this mode only Doc creation is attempted through official MCP `docx.builtin.import`. Slides and Canvas remain on `lark-cli`. MCP creates a new document by import; it does not directly edit an existing Doc. Any MCP startup, tool manifest, schema, authorization, or import failure is recorded with secrets redacted and then falls back to the stable `lark-cli` / fake path.
+
+The listener keeps auto-confirmed artifact generation in the background, so
+`/status` can still respond while Doc, Slides, or Canvas is running. Terminal
+logs prefixed with `[Agent-Pilot]` show the routed command type and latest task
+status; if a real MCP process hangs, the tool layer falls back after
+`FEISHU_TOOL_ADAPTER_TIMEOUT_SECONDS`.
 
 If you prefer `.env`-only operation, put the same non-secret mode switches in `.env`:
 
@@ -162,7 +172,9 @@ FEISHU_MCP_MODE=real
 FEISHU_MCP_TOKEN_MODE=user_access_token
 FEISHU_MCP_USE_UAT=true
 AGENT_PILOT_PLANNER_MODE=auto
+AGENT_PILOT_ROUTER_MODE=auto
 AGENT_PILOT_AUTO_CONFIRM=true
+FEISHU_TOOL_ADAPTER_TIMEOUT_SECONDS=25
 LARK_STREAM_DELAY_SECONDS=0.2
 ```
 
@@ -198,9 +210,12 @@ Then:
 确认
 现在做到哪了？
 修改：PPT 更突出工程实现和多端协同
+在 Agent-Pilot 参赛方案最后一行添加当前时间
 ```
 
 The first reply should appear immediately as a planning-status card. The full Agent plan updates into the same card after Planner Agent finishes.
+
+Revision messages may be explicit (`修改：PPT ...`) or natural (`在参赛方案最后一行添加...`). IntentRouterAgent resolves the target artifact first; if it cannot tell whether the user means Doc, Slides, or Canvas, it asks for clarification instead of regenerating all artifacts.
 
 Useful command checks:
 

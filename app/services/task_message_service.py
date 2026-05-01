@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
-from app.schemas.agent_pilot import AgentPilotCommand
+from app.agents.intent_router_agent import route_agent_pilot_message
+from app.schemas.agent_pilot import AgentPilotCommand, feishu_ms_to_float_seconds, utc_now
 
 
 class TaskMessageService:
@@ -16,34 +16,25 @@ class TaskMessageService:
         message_id: str | None = None,
         user_id: str | None = None,
         task_id: str | None = None,
+        event_id: str | None = None,
+        event_time: float | None = None,
     ) -> AgentPilotCommand:
-        normalized = self._strip_bot_mention(text)
-        lower = normalized.lower()
-
-        if not normalized:
-            command_type = "unknown"
-        elif lower in {"/help", "help", "帮助", "命令"}:
-            command_type = "help"
-        elif lower in {"/reset", "reset", "重置", "清空上下文"}:
-            command_type = "reset"
-        elif lower in {"ping", "/ping", "hello", "hi"} or normalized in {"你好", "在吗"}:
-            command_type = "health"
-        elif normalized == "确认":
-            command_type = "confirm"
-        elif lower in {"/status", "status"} or normalized in {"现在做到哪了？", "现在做到哪了?", "进度", "当前进度", "状态"}:
-            command_type = "progress"
-        elif normalized.startswith(("修改：", "修改:")):
-            command_type = "revise"
-        else:
-            command_type = "new_task"
+        route = route_agent_pilot_message(text)
 
         return AgentPilotCommand(
-            type=command_type,
-            text=normalized,
+            type=route.command_type,
+            text=route.text,
             chat_id=chat_id,
             message_id=message_id,
             user_id=user_id,
             task_id=task_id,
+            target_artifacts=route.target_artifacts,
+            route_confidence=route.confidence,
+            needs_clarification=route.needs_clarification,
+            route_reason=route.reason,
+            route_source=route.route_source,
+            event_id=event_id,
+            event_time=event_time,
         )
 
     def parse_lark_event(self, event: dict[str, Any]) -> AgentPilotCommand:
@@ -52,6 +43,15 @@ class TaskMessageService:
         message_id = self._first_value(event, "message_id", "messageId", "message")
         user_id = self._first_value(event, "user_id", "userId", "sender_id", "sender")
 
+        header = event.get("header")
+        event_id: str | None = None
+        event_time: float | None = None
+        if isinstance(header, dict):
+            event_id = _first_str(header, "event_id")
+            create_time_ms = _first_str(header, "create_time")
+            if create_time_ms:
+                event_time = feishu_ms_to_float_seconds(create_time_ms)
+
         raw_event = event.get("event")
         if isinstance(raw_event, dict):
             message = raw_event.get("message")
@@ -59,14 +59,23 @@ class TaskMessageService:
             if isinstance(message, dict):
                 chat_id = chat_id or message.get("chat_id")
                 message_id = message_id or message.get("message_id")
+                if event_time is None:
+                    msg_create_time = _first_str(message, "create_time")
+                    if msg_create_time:
+                        event_time = feishu_ms_to_float_seconds(msg_create_time)
             if isinstance(sender, dict):
                 user_id = user_id or sender.get("sender_id", {}).get("open_id")
+
+        if event_time is None:
+            event_time = feishu_ms_to_float_seconds("")
 
         return self.parse_text(
             text,
             chat_id=chat_id,
             message_id=message_id,
             user_id=user_id,
+            event_id=event_id,
+            event_time=event_time,
         )
 
     def _extract_text(self, event: dict[str, Any]) -> str:
@@ -97,13 +106,17 @@ class TaskMessageService:
         return content
 
     def _first_value(self, event: dict[str, Any], *keys: str) -> str | None:
-        for key in keys:
-            value = event.get(key)
-            if isinstance(value, str) and value:
-                return value
-        return None
+        return _first_str_multi(event, keys)
 
-    def _strip_bot_mention(self, text: str) -> str:
-        stripped = (text or "").strip()
-        stripped = re.sub(r"^@Agent\s*", "", stripped, flags=re.IGNORECASE)
-        return stripped.strip()
+
+def _first_str_multi(mapping: dict[str, Any], keys: tuple[str, ...]) -> str | None:
+    for key in keys:
+        value = mapping.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _first_str(mapping: dict[str, Any], key: str) -> str | None:
+    value = mapping.get(key)
+    return value if isinstance(value, str) and value else None
