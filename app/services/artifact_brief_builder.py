@@ -21,12 +21,6 @@ def build_artifact_brief(task: AgentPilotTask) -> ArtifactBrief:
     plan_steps = task.plan.steps if task.plan else []
     planned_tools = _unique_non_empty(step.tool for step in plan_steps)
     planned_agents = _unique_non_empty(step.agent for step in plan_steps)
-    revision_instructions = [
-        instruction
-        for item in task.revisions
-        if (instruction := _revision_instruction(item))
-    ]
-
     task_summary = (
         "Agent-Pilot 将飞书 IM 中的办公协同需求编排为参赛方案文档、5 页答辩材料和架构画板，"
         "重点证明 Agent 编排、多端协同、飞书办公套件联动和工程可落地性。"
@@ -41,8 +35,6 @@ def build_artifact_brief(task: AgentPilotTask) -> ArtifactBrief:
         "突出飞书办公套件联动：IM 负责交互，Doc 沉淀方案，Slides 支撑答辩，Canvas/Whiteboard 展示架构。",
         "突出工程实现：FastAPI、显式状态机、LarkClient 抽象、真实 IM、真实/假 artifact fallback。",
     ]
-    if revision_instructions:
-        must_have_points.append("吸收最近修改意见，优先强化：" + "；".join(revision_instructions))
 
     return ArtifactBrief(
         task_summary=task_summary,
@@ -54,7 +46,7 @@ def build_artifact_brief(task: AgentPilotTask) -> ArtifactBrief:
             "用同一套 brief 驱动 Doc、Slides、Canvas，避免三个产物故事不一致。",
         ],
         agent_architecture=[
-            "TaskMessageService 捕捉 IM 文本、确认、进度查询、修改和 /reset 等命令。",
+            "TaskMessageService 接收 IM 文本，IntentRouterAgent 负责识别确认、进度查询、自然语言修改和 /reset 等命令。",
             f"PlannerAgent 生成参赛执行计划并选择工具：{', '.join(planned_tools) if planned_tools else 'Feishu IM, Doc, Slides, Canvas/Whiteboard'}。",
             f"专业 Agent 分工：{', '.join(planned_agents) if planned_agents else 'DocAgent, PresentationAgent, CanvasAgent, DeliveryService'}。",
             "FeishuToolLayer 将 ToolPlan 路由到 MCP、lark-cli 或 fake fallback。",
@@ -90,7 +82,6 @@ def build_artifact_brief(task: AgentPilotTask) -> ArtifactBrief:
             "真实 IM 与 artifact 权限解耦，避免用户授权影响 Bot 监听。",
             "MCP 不支持的能力回落到 lark-cli，lark-cli 失败时回落到 fake artifact。",
             "fallback 会保留本地产物和真实格式，让演示继续可讲、可看、可验证。",
-            *([f"已纳入修改意见：{item}" for item in revision_instructions] if revision_instructions else []),
         ],
     )
 
@@ -102,9 +93,3 @@ def _unique_non_empty(values: Iterable[object]) -> list[str]:
         if text and text not in result:
             result.append(text)
     return result
-
-
-def _revision_instruction(item: object) -> str:
-    if isinstance(item, dict):
-        return str(item.get("instruction", "")).strip()
-    return str(getattr(item, "instruction", "")).strip()

@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import json
 
 from app.integrations.lark_cli_client import LarkCliClient
+from app.schemas.agent_pilot import ArtifactRef
 
 
 def test_send_message_builds_lark_cli_command(monkeypatch):
@@ -303,6 +304,114 @@ def test_create_canvas_dry_run_returns_artifact_when_whiteboard_requires_auth(tm
     assert artifact.status == "dry_run"
     assert artifact.url == "https://dry-run.feishu.local/whiteboard/task-1"
     assert "need_user_authorization" in artifact.summary
+
+
+def test_update_doc_builds_overwrite_command_and_keeps_link(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.integrations.lark_cli_client._resolve_lark_cli_prefix",
+        lambda executable: ["lark-cli"],
+    )
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout='{"data":{"url":"https://doc"}}', stderr="")
+
+    monkeypatch.setattr("app.integrations.lark_cli_client.subprocess.run", fake_run)
+    client = LarkCliClient(dry_run=True)
+    artifact = ArtifactRef(
+        artifact_id="task-1-doc",
+        kind="doc",
+        title="方案",
+        url="https://doc",
+        token="doc_token",
+        status="created",
+    )
+
+    updated = client.update_doc("task-1", artifact, "# 新方案", Path(tmp_path))
+
+    assert updated.url == "https://doc"
+    assert updated.token == "doc_token"
+    assert updated.status == "updated"
+    assert calls[0][1:5] == ["docs", "+update", "--api-version", "v2"]
+    assert calls[0][calls[0].index("--doc") + 1] == "doc_token"
+    assert calls[0][calls[0].index("--mode") + 1] == "overwrite"
+    markdown_source = calls[0][calls[0].index("--markdown") + 1]
+    assert Path(markdown_source[1:]).read_text(encoding="utf-8") == "# 新方案"
+
+
+def test_update_canvas_builds_whiteboard_update_command(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.integrations.lark_cli_client._resolve_lark_cli_prefix",
+        lambda executable: ["lark-cli"],
+    )
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout='{"ok":true}', stderr="")
+
+    monkeypatch.setattr("app.integrations.lark_cli_client.subprocess.run", fake_run)
+    client = LarkCliClient(dry_run=True)
+    artifact = ArtifactRef(
+        artifact_id="task-1-canvas",
+        kind="canvas",
+        title="画板",
+        url="https://doc-with-board",
+        token="doc_token",
+        status="created",
+        metadata={"whiteboard_token": "wb_token"},
+    )
+
+    updated = client.update_canvas("task-1", artifact, "flowchart LR\nA-->B", Path(tmp_path))
+
+    assert updated.url == artifact.url
+    assert updated.token == artifact.token
+    assert updated.status == "updated"
+    assert calls[0][1:3] == ["whiteboard", "+update"]
+    assert calls[0][calls[0].index("--whiteboard-token") + 1] == "wb_token"
+    assert calls[0][calls[0].index("--input_format") + 1] == "mermaid"
+    assert "--overwrite" in calls[0]
+    assert "--yes" in calls[0]
+
+
+def test_update_slides_replaces_existing_slide_ids(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "app.integrations.lark_cli_client._resolve_lark_cli_prefix",
+        lambda executable: ["lark-cli"],
+    )
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout='{"ok":true}', stderr="")
+
+    monkeypatch.setattr("app.integrations.lark_cli_client.subprocess.run", fake_run)
+    client = LarkCliClient(dry_run=True)
+    artifact = ArtifactRef(
+        artifact_id="task-1-slides",
+        kind="slides",
+        title="汇报",
+        url="https://slides",
+        token="slides_token",
+        status="created",
+        metadata={"slide_ids": ["slide-1"]},
+    )
+
+    updated = client.update_slides(
+        "task-1",
+        artifact,
+        [{"title": "封面", "body": "工程实现"}],
+        Path(tmp_path),
+    )
+
+    assert updated.url == artifact.url
+    assert updated.token == artifact.token
+    assert updated.status == "updated"
+    assert calls[0][1:3] == ["slides", "+replace-slide"]
+    assert calls[0][calls[0].index("--presentation") + 1] == "slides_token"
+    assert calls[0][calls[0].index("--slide-id") + 1] == "slide-1"
+    assert "--parts" in calls[0]
 
 
 def test_build_lark_cli_command_wraps_powershell_script(monkeypatch):

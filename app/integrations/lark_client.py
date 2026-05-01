@@ -36,3 +36,22 @@ class LarkClient(Protocol):
         self, task_id: str, title: str, mermaid: str, task_dir: Path
     ) -> ArtifactRef:
         ...
+
+    def update_doc(
+        self, task_id: str, artifact: ArtifactRef, content: str, task_dir: Path
+    ) -> ArtifactRef:
+        ...
+
+    def update_slides(
+        self,
+        task_id: str,
+        artifact: ArtifactRef,
+        slides: list[dict[str, str]],
+        task_dir: Path,
+    ) -> ArtifactRef:
+        ...
+
+    def update_canvas(
+        self, task_id: str, artifact: ArtifactRef, mermaid: str, task_dir: Path
+    ) -> ArtifactRef:
+        ...

@@ -78,6 +78,7 @@ class FakeLarkClient:
             local_path=str(path),
             status="fake",
             summary="已生成参赛方案文档。",
+            metadata={"source_format": "markdown"},
         )
 
     def create_slides(
@@ -98,6 +99,10 @@ class FakeLarkClient:
             local_path=str(path),
             status="fake",
             summary="已生成 5 页答辩汇报材料。",
+            metadata={
+                "source_format": "json",
+                "slide_ids": [f"fake-slide-{index}" for index, _ in enumerate(slides, start=1)],
+            },
         )
 
     def create_canvas(
@@ -115,4 +120,68 @@ class FakeLarkClient:
             local_path=str(path),
             status="fake",
             summary="已生成 Agent 编排架构画板。",
+            metadata={"source_format": "mermaid", "whiteboard_token": f"fake-whiteboard-{task_id}"},
+        )
+
+    def update_doc(
+        self, task_id: str, artifact: ArtifactRef, content: str, task_dir: Path
+    ) -> ArtifactRef:
+        task_dir.mkdir(parents=True, exist_ok=True)
+        path = Path(artifact.local_path) if artifact.local_path else task_dir / "doc.md"
+        path.write_text(content, encoding="utf-8")
+        return artifact.model_copy(
+            update={
+                "local_path": str(path),
+                "status": "updated",
+                "summary": "已原地更新参赛方案文档。",
+                "metadata": {**artifact.metadata, "source_format": "markdown"},
+            }
+        )
+
+    def update_slides(
+        self,
+        task_id: str,
+        artifact: ArtifactRef,
+        slides: list[dict[str, str]],
+        task_dir: Path,
+    ) -> ArtifactRef:
+        task_dir.mkdir(parents=True, exist_ok=True)
+        path = Path(artifact.local_path) if artifact.local_path else task_dir / "slides.json"
+        path.write_text(
+            json.dumps(slides, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        metadata = {
+            **artifact.metadata,
+            "source_format": "json",
+            "slide_ids": artifact.metadata.get("slide_ids")
+            or [f"fake-slide-{index}" for index, _ in enumerate(slides, start=1)],
+        }
+        return artifact.model_copy(
+            update={
+                "local_path": str(path),
+                "status": "updated",
+                "summary": "已原地更新 5 页答辩汇报材料。",
+                "metadata": metadata,
+            }
+        )
+
+    def update_canvas(
+        self, task_id: str, artifact: ArtifactRef, mermaid: str, task_dir: Path
+    ) -> ArtifactRef:
+        task_dir.mkdir(parents=True, exist_ok=True)
+        path = Path(artifact.local_path) if artifact.local_path else task_dir / "canvas.mmd"
+        path.write_text(mermaid, encoding="utf-8")
+        metadata = {
+            **artifact.metadata,
+            "source_format": "mermaid",
+            "whiteboard_token": artifact.metadata.get("whiteboard_token") or artifact.token,
+        }
+        return artifact.model_copy(
+            update={
+                "local_path": str(path),
+                "status": "updated",
+                "summary": "已原地更新 Agent 编排架构画板。",
+                "metadata": metadata,
+            }
         )

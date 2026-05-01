@@ -27,6 +27,7 @@ ToolExecutionStatus = Literal["planned", "running", "succeeded", "fallback", "fa
 MessageCommandType = Literal[
     "new_task",
     "confirm",
+    "confirm_reset",
     "progress",
     "revise",
     "health",
@@ -35,9 +36,27 @@ MessageCommandType = Literal[
     "unknown",
 ]
 
+RouteSource = Literal["llm", "fallback", "hard_command"]
+
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def feishu_ms_to_utc_iso(millis_str: str) -> str:
+    try:
+        return datetime.fromtimestamp(
+            float(millis_str) / 1000.0, tz=timezone.utc
+        ).isoformat()
+    except (TypeError, ValueError):
+        return utc_now()
+
+
+def feishu_ms_to_float_seconds(millis_str: str) -> float:
+    try:
+        return float(millis_str) / 1000.0
+    except (TypeError, ValueError):
+        return datetime.now(timezone.utc).timestamp()
 
 
 class PlanStep(BaseModel):
@@ -65,6 +84,7 @@ class ArtifactRef(BaseModel):
     local_path: str | None = None
     status: ArtifactStatus
     summary: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class ToolCallPlan(BaseModel):
@@ -113,6 +133,16 @@ class RevisionRecord(BaseModel):
     created_at: str = Field(default_factory=utc_now)
 
 
+class IntentRoute(BaseModel):
+    command_type: MessageCommandType
+    text: str = ""
+    target_artifacts: list[ArtifactKind] = Field(default_factory=list)
+    confidence: float = 0.0
+    needs_clarification: bool = False
+    reason: str = ""
+    route_source: RouteSource | None = None
+
+
 class AgentPilotTask(BaseModel):
     task_id: str
     input_text: str
@@ -137,6 +167,14 @@ class AgentPilotCommand(BaseModel):
     message_id: str | None = None
     user_id: str | None = None
     task_id: str | None = None
+    target_artifacts: list[ArtifactKind] = Field(default_factory=list)
+    route_confidence: float = 0.0
+    needs_clarification: bool = False
+    route_reason: str = ""
+    route_source: RouteSource | None = None
+    event_id: str | None = None
+    event_time: float | None = None
+    received_at: str = Field(default_factory=utc_now)
 
 
 class TaskCreateRequest(BaseModel):

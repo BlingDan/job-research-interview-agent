@@ -25,7 +25,10 @@ class Settings(BaseSettings):
     lark_stream_delay_seconds: float = 0.0
     agent_pilot_default_chat_id: str | None = None
     agent_pilot_auto_confirm: bool = False
+    agent_pilot_background_auto_confirm: bool = False
     agent_pilot_planner_mode: Literal["fallback", "auto", "llm"] = "fallback"
+    agent_pilot_router_mode: Literal["fallback", "auto", "llm"] = "auto"
+    agent_pilot_router_timeout_seconds: float = 15.0
     feishu_tool_mode: Literal["hybrid", "mcp", "lark_cli", "fake"] = "hybrid"
     feishu_mcp_mode: Literal["off", "dry_run", "real"] = "off"
     feishu_mcp_app_id: str = ""
@@ -35,6 +38,7 @@ class Settings(BaseSettings):
     feishu_mcp_timeout_seconds: float = 20.0
     feishu_mcp_token_mode: Literal["auto", "user_access_token", "tenant_access_token"] = "user_access_token"
     feishu_mcp_use_uat: bool = True
+    feishu_tool_adapter_timeout_seconds: float = 25.0
     
     model_config = SettingsConfigDict(
         env_file=".env",

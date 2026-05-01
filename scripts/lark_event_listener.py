@@ -33,23 +33,84 @@ from app.services.task_message_service import TaskMessageService
 from app.schemas.agent_pilot import AgentPilotResponse
 
 
+def _short(value: str | None) -> str:
+    if not value:
+        return "-"
+    if len(value) <= 12:
+        return value
+    return f"{value[:6]}...{value[-4:]}"
+
+
+def _log(message: str) -> None:
+    print(f"[Agent-Pilot] {message}", file=sys.stderr, flush=True)
+
+
+_MAX_DEDUP_SET_SIZE = 1000
+
+
+ROUTING_ACK_TEXT = "正在理解你的意图，稍等..."
+
+def _extract_message_id_from_event(event: dict) -> str | None:
+    raw_event = event.get("event")
+    if isinstance(raw_event, dict):
+        message = raw_event.get("message")
+        if isinstance(message, dict):
+            message_id = message.get("message_id")
+            if isinstance(message_id, str) and message_id:
+                return message_id
+    message_id = event.get("message_id")
+    if isinstance(message_id, str) and message_id:
+        return message_id
+    return None
+
+
 def handle_event_line(
     line: str,
     orchestrator: AgentPilotOrchestrator,
     message_service: TaskMessageService,
+    seen_event_ids: set[str],
 ) -> AgentPilotResponse | None:
     text = line.strip()
     if not text:
         return None
     event = json.loads(text)
+
+    message_id = _extract_message_id_from_event(event)
+    if message_id:
+        try:
+            orchestrator.lark_client.reply_message(message_id, ROUTING_ACK_TEXT)
+        except Exception:
+            pass
+
     command = message_service.parse_lark_event(event)
-    return orchestrator.handle_command(command)
+
+    if command.event_id:
+        if command.event_id in seen_event_ids:
+            _log(f"skipping duplicate event_id={_short(command.event_id)}")
+            return None
+        if len(seen_event_ids) >= _MAX_DEDUP_SET_SIZE:
+            seen_event_ids.clear()
+        seen_event_ids.add(command.event_id)
+
+    _log(
+        "received "
+        f"type={command.type} chat={_short(command.chat_id)} "
+        f"message={_short(command.message_id)}"
+    )
+    response = orchestrator.handle_command(command)
+    if response is not None:
+        _log(f"task={response.task_id} status={response.status}")
+    return response
 
 
 def consume_events(stream: TextIO, orchestrator: AgentPilotOrchestrator) -> None:
     message_service = TaskMessageService()
+    seen_event_ids: set[str] = set()
     for line in stream:
-        handle_event_line(line, orchestrator, message_service)
+        try:
+            handle_event_line(line, orchestrator, message_service, seen_event_ids)
+        except Exception as exc:
+            _log(f"event handling failed: {exc}")
 
 
 def build_event_subscribe_command() -> list[str]:
@@ -59,7 +120,6 @@ def build_event_subscribe_command() -> list[str]:
             "+subscribe",
             "--as",
             "bot",
-            "--compact",
             "--force",
         ]
     )
@@ -79,7 +139,7 @@ def main() -> None:
     )
     if process.stdout is None:
         raise RuntimeError("failed to open lark-cli stdout")
-    consume_events(process.stdout, build_orchestrator())
+    consume_events(process.stdout, build_orchestrator(background_auto_confirm=True))
 
 
 if __name__ == "__main__":

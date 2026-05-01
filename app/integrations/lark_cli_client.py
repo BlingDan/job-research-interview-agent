@@ -140,6 +140,7 @@ class LarkCliClient:
             local_path=path,
             fallback_url=f"https://dry-run.feishu.local/doc/{task_id}",
             summary="已生成参赛方案文档。",
+            metadata={"source_format": "markdown"},
         )
 
     def create_slides(
@@ -172,6 +173,10 @@ class LarkCliClient:
             local_path=path,
             fallback_url=f"https://dry-run.feishu.local/slides/{task_id}",
             summary="已生成 5 页答辩汇报材料。",
+            metadata={
+                "source_format": "json",
+                "slide_ids": _extract_slide_ids(result),
+            },
         )
         if not self.dry_run and artifact.token and _is_fallback_url(artifact.url):
             metadata_url = self._drive_meta_url(artifact.token, "slides")
@@ -214,6 +219,10 @@ class LarkCliClient:
                 local_path=str(path),
                 status="dry_run",
                 summary=f"画板 dry-run 未执行：{exc}",
+                metadata={
+                    "source_format": "mermaid",
+                    "whiteboard_token": f"dry-run-whiteboard-{task_id}",
+                },
             )
         board_token = _extract_whiteboard_token(result)
         doc_url = _first_result_value(result, "url", "document_url")
@@ -246,6 +255,132 @@ class LarkCliClient:
             local_path=str(path),
             status="dry_run" if self.dry_run else "created",
             summary="已生成 Agent 编排架构画板。",
+            metadata={
+                "source_format": "mermaid",
+                "whiteboard_token": board_token or doc_token or f"dry-run-whiteboard-{task_id}",
+                "doc_token": doc_token,
+            },
+        )
+
+    def update_doc(
+        self, task_id: str, artifact: ArtifactRef, content: str, task_dir: Path
+    ) -> ArtifactRef:
+        task_dir.mkdir(parents=True, exist_ok=True)
+        path = Path(artifact.local_path) if artifact.local_path else task_dir / "doc.md"
+        path.write_text(content, encoding="utf-8")
+        doc_ref = artifact.token or artifact.url
+        if not doc_ref:
+            raise LarkCliError("missing doc token/url for in-place update")
+        self._run(
+            [
+                "docs",
+                "+update",
+                "--api-version",
+                "v2",
+                "--as",
+                "user",
+                "--doc",
+                doc_ref,
+                "--mode",
+                "overwrite",
+                "--markdown",
+                f"@{path.as_posix()}",
+            ]
+        )
+        return artifact.model_copy(
+            update={
+                "local_path": str(path),
+                "status": "updated",
+                "summary": "已原地更新参赛方案文档。",
+                "metadata": {**artifact.metadata, "source_format": "markdown"},
+            }
+        )
+
+    def update_slides(
+        self,
+        task_id: str,
+        artifact: ArtifactRef,
+        slides: list[dict[str, str]],
+        task_dir: Path,
+    ) -> ArtifactRef:
+        task_dir.mkdir(parents=True, exist_ok=True)
+        path = Path(artifact.local_path) if artifact.local_path else task_dir / "slides.json"
+        path.write_text(
+            json.dumps(slides, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        presentation = artifact.token or artifact.url
+        if not presentation:
+            raise LarkCliError("missing presentation token/url for in-place update")
+        slide_ids = [
+            item for item in artifact.metadata.get("slide_ids", []) if isinstance(item, str) and item
+        ]
+        if len(slide_ids) < len(slides):
+            raise LarkCliError("missing slide ids for in-place slides update")
+        for slide, slide_id in zip(slides, slide_ids):
+            self._run(
+                [
+                    "slides",
+                    "+replace-slide",
+                    "--as",
+                    "user",
+                    "--presentation",
+                    presentation,
+                    "--slide-id",
+                    slide_id,
+                    "--parts",
+                    json.dumps([self._slide_xml(slide)], ensure_ascii=False),
+                    "--revision-id",
+                    "-1",
+                ]
+            )
+        return artifact.model_copy(
+            update={
+                "local_path": str(path),
+                "status": "updated",
+                "summary": "已原地更新 5 页答辩汇报材料。",
+                "metadata": {**artifact.metadata, "source_format": "json"},
+            }
+        )
+
+    def update_canvas(
+        self, task_id: str, artifact: ArtifactRef, mermaid: str, task_dir: Path
+    ) -> ArtifactRef:
+        task_dir.mkdir(parents=True, exist_ok=True)
+        path = Path(artifact.local_path) if artifact.local_path else task_dir / "canvas.mmd"
+        path.write_text(mermaid, encoding="utf-8")
+        whiteboard_token = artifact.metadata.get("whiteboard_token") or artifact.token
+        if not isinstance(whiteboard_token, str) or not whiteboard_token:
+            raise LarkCliError("missing whiteboard token for in-place update")
+        self._run(
+            [
+                "whiteboard",
+                "+update",
+                "--as",
+                "user",
+                "--whiteboard-token",
+                whiteboard_token,
+                "--source",
+                f"@{path.as_posix()}",
+                "--input_format",
+                "mermaid",
+                "--idempotent-token",
+                f"agentpilot-{uuid.uuid4().hex[:16]}",
+                "--overwrite",
+                "--yes",
+            ]
+        )
+        return artifact.model_copy(
+            update={
+                "local_path": str(path),
+                "status": "updated",
+                "summary": "已原地更新 Agent 编排架构画板。",
+                "metadata": {
+                    **artifact.metadata,
+                    "source_format": "mermaid",
+                    "whiteboard_token": whiteboard_token,
+                },
+            }
         )
 
     def _run(self, args: list[str]) -> dict:
@@ -286,6 +421,7 @@ class LarkCliClient:
         local_path: Path,
         fallback_url: str,
         summary: str,
+        metadata: dict[str, Any] | None = None,
     ) -> ArtifactRef:
         url = _first_result_value(
             result,
@@ -310,6 +446,7 @@ class LarkCliClient:
             local_path=str(local_path),
             status="dry_run" if self.dry_run else "created",
             summary=summary,
+            metadata=metadata or {},
         )
 
     def _slide_xml(self, slide: dict[str, str]) -> str:
@@ -409,6 +546,16 @@ def _extract_whiteboard_token(result: dict[str, Any]) -> str | None:
             if isinstance(token, str) and token:
                 return token
     return None
+
+
+def _extract_slide_ids(result: dict[str, Any]) -> list[str]:
+    slide_ids: list[str] = []
+    for node in _walk_dicts(result):
+        for key in ("slide_id", "page_id", "id"):
+            value = node.get(key)
+            if isinstance(value, str) and value and value not in slide_ids:
+                slide_ids.append(value)
+    return slide_ids
 
 
 def _is_fallback_url(url: str | None) -> bool:
