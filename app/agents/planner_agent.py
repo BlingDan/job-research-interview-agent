@@ -18,7 +18,7 @@ from app.schemas.task import TaskCreateRequest
 
 PLANNER_SYSTEM_PROMPT = dedent(
     """
-    你是一个求职研究 Planner Agent。
+    你是一个 Agent-Pilot Planner Agent。
     你的任务是把用户输入拆成 3 到 5 个高质量研究 TODO。
 
     输出要求：
@@ -87,13 +87,13 @@ AGENT_PILOT_PLANNER_SYSTEM_PROMPT = dedent(
     """
     你是 Agent-Pilot 的 Planner Agent。
     你的目标是把飞书 IM 中的办公协同需求拆成可执行计划，并明确需要调用的飞书办公套件。
-    你正在服务“基于 IM 的办公协同智能助手”比赛，所有规划都要让评委看出飞书原生、多端协同和 Agent 编排能力。
+    你的计划应充分体现飞书原生、多端协同和 Agent 编排能力。
 
     必须覆盖官方 A-F 场景：
     A 意图/指令入口：从飞书 IM 捕捉自然语言需求。
     B 任务理解和规划：拆解阶段、Agent、工具和交付物。
     C Doc/Whiteboard 生成：生成方案文档和画板/白板图。
-    D Presentation 生成：生成 5 页答辩汇报材料。
+    D Presentation 生成：生成 5 页汇报演示文稿。
     E 多端协同：桌面端/移动端共享同一 IM 任务状态和产物链接。
     F 总结交付：最终回到 IM 汇总成果和后续修改入口。
 
@@ -144,7 +144,8 @@ def _build_agent_pilot_user_prompt(user_message: str) -> str:
         2. 每一步写清楚 goal、agent、tool 和 expected_artifact。
         3. tool 必须优先使用 Feishu IM、Feishu Doc、Feishu Slides、Feishu Canvas/Whiteboard。
         4. confirmation_prompt 必须要求用户回复「确认」后再继续生成产物。
-        5. 计划要像真实 Agent 编排，不要像固定脚本。
+        5. summary 要体现飞书原生、多端协同和 Agent 编排能力，让用户感受到智能编排而非固定脚本。
+        6. 计划反映用户的具体需求，每个步骤的 goal 要针对性地解决用户输入中的问题，避免千篇一律。
         """
     ).strip()
 
@@ -196,31 +197,31 @@ def parse_plan_output(raw_text: str) -> AgentPlan:
 
 def build_fallback_plan(user_message: str) -> AgentPlan:
     return AgentPlan(
-        summary="我会把 IM 需求编排为参赛方案文档、5 页答辩材料和架构画板，并在同一聊天中交付。",
+        summary="我会把 IM 需求编排为项目方案文档、5 页汇报演示文稿和架构画板，并在同一聊天中交付。",
         steps=[
             PlanStep(
                 id="step-1",
                 title="意图捕捉与任务规划",
-                goal="理解 IM 需求，拆解 Agent-Pilot 参赛交付物和执行顺序。",
+                goal="理解 IM 需求，拆解 Agent-Pilot 交付物和执行顺序。",
                 agent="PlannerAgent",
                 tool="Feishu IM",
                 expected_artifact="确认计划",
             ),
             PlanStep(
                 id="step-2",
-                title="生成参赛方案文档",
+                title="生成项目方案文档",
                 goal="围绕 Agent 编排、多端协同、飞书办公套件联动和工程实现生成方案。",
                 agent="DocAgent",
                 tool="Feishu Doc",
-                expected_artifact="参赛方案文档",
+                expected_artifact="项目方案文档",
             ),
             PlanStep(
                 id="step-3",
-                title="生成 5 页答辩汇报材料",
-                goal="把方案浓缩成适合比赛答辩的 5 页 Slides。",
+                title="生成 5 页汇报演示文稿",
+                goal="把方案浓缩成适合项目汇报的 5 页 Slides。",
                 agent="PresentationAgent",
                 tool="Feishu Slides",
-                expected_artifact="5 页答辩汇报材料",
+                expected_artifact="5 页汇报演示文稿",
             ),
             PlanStep(
                 id="step-4",
@@ -239,6 +240,6 @@ def build_fallback_plan(user_message: str) -> AgentPlan:
                 expected_artifact="最终交付消息",
             ),
         ],
-        confirmation_prompt="回复「确认」后我开始生成参赛方案文档、5 页答辩材料和架构画板。",
+        confirmation_prompt="回复「确认」后我开始生成项目方案文档、5 页汇报演示文稿和架构画板。",
         tool_plan=build_default_tool_plan(),
     )

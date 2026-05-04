@@ -1,11 +1,68 @@
 from __future__ import annotations
 
+import json
+
+from app.core.llm import JobResearchLLM
 from app.schemas.agent_pilot import AgentPilotTask, ArtifactBrief
 from app.services.artifact_brief_builder import build_artifact_brief
 
 
 def build_canvas_artifact(task: AgentPilotTask) -> str:
+    try:
+        result = build_llm_canvas(task)
+        lower = result.lower()
+        if "flowchart" in lower or "graph" in lower:
+            return result
+    except Exception:
+        pass
     return build_fallback_canvas(task)
+
+
+def build_llm_canvas(task: AgentPilotTask) -> str:
+    brief = _brief(task)
+    llm = JobResearchLLM(temperature=0.3, max_tokens=4096)
+    messages = [
+        {
+            "role": "system",
+            "content": "你是 Agent-Pilot 的 Canvas Agent。根据用户的原始需求和 ArtifactBrief 生成一个 Mermaid flowchart 架构图。展示 IM、Agent 编排、飞书办公套件联动、多端协同和 fallback 机制。只返回 Mermaid 代码，不要额外解释，不要用代码块包裹。",
+        },
+        {
+            "role": "user",
+            "content": f"""原始需求：
+{task.input_text}
+
+方案摘要：
+{brief.task_summary}
+
+Agent 架构：
+{json.dumps(brief.agent_architecture, ensure_ascii=False)}
+
+飞书套件联动：
+{json.dumps(brief.feishu_suite_linkage, ensure_ascii=False)}
+
+多端协同：
+{json.dumps(brief.multi_end_collaboration_story, ensure_ascii=False)}
+
+风险与 fallback：
+{json.dumps(brief.risk_and_fallback_story, ensure_ascii=False)}
+
+请生成 Mermaid flowchart 架构图。""",
+        },
+    ]
+    raw = llm.invoke(messages).strip()
+    return _strip_mermaid_fence(raw)
+
+
+def _strip_mermaid_fence(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.split("\n")
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        return "\n".join(lines)
+    return stripped
 
 
 def build_fallback_canvas(task: AgentPilotTask) -> str:
@@ -29,12 +86,12 @@ def build_fallback_canvas(task: AgentPilotTask) -> str:
     end
 
     subgraph C["C: Doc and Whiteboard"]
-        Doc["Feishu Doc<br/>competition proposal"]
+        Doc["Feishu Doc<br/>project proposal"]
         Canvas["Feishu Canvas / Whiteboard<br/>architecture diagram"]
     end
 
     subgraph D["D: Presentation"]
-        Slides["Feishu Slides<br/>5-page defense deck"]
+        Slides["Feishu Slides<br/>5-page presentation deck"]
     end
 
     subgraph EF["E-F: Collaboration and Delivery"]
@@ -57,8 +114,8 @@ def build_fallback_canvas(task: AgentPilotTask) -> str:
     Canvas --> State
     State --> Delivery --> IM
 
-    Judge["Winning proof points<br/>{must_have}"]
-    Brief --> Judge
+    Capabilities["Key Capabilities<br/>{must_have}"]
+    Brief --> Capabilities
 """
 
 

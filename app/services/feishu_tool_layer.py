@@ -93,7 +93,7 @@ class FeishuMcpToolAdapter:
                 url=url,
                 token=token,
                 status="created",
-                summary="已通过官方飞书 MCP 导入创建参赛方案文档。",
+                summary="已通过官方飞书 MCP 导入创建项目方案文档。",
             )
         except UnsupportedCapabilityError:
             raise

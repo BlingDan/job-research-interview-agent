@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import threading
-import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 from app.agents.canvas_agent import build_canvas_artifact
@@ -12,6 +12,7 @@ from app.agents.doc_agent import build_doc_artifact
 from app.agents.intent_router_agent import route_agent_pilot_message
 from app.agents.planner_agent import build_agent_plan
 from app.agents.presentation_agent import build_slide_artifact
+from app.core.llm import JobResearchLLM
 from app.agents.artifact_revision_agent import (
     ArtifactRevisionPatch,
     apply_canvas_patch,
@@ -35,11 +36,10 @@ from app.services.artifact_brief_builder import build_artifact_brief
 from app.services.delivery_service import (
     format_error_reply,
     format_final_reply,
+    format_generating_card,
     format_help_reply,
     format_no_active_task_reply,
-    format_plan_reply_chunks,
     format_plan_reply,
-    format_planning_ack,
     format_progress_reply,
     format_reset_confirm_reply,
     format_reset_expired_reply,
@@ -90,21 +90,12 @@ class AgentPilotOrchestrator:
         )
         try:
             self.state_service.update_status(task, "PLANNING")
-            stream_message_id = self._send_planning_ack(task)
             task.plan = build_agent_plan(request.message)
             self.state_service.update_status(task, "WAITING_CONFIRMATION")
             reply = with_fallback_notice(format_plan_reply(task), route_source)
-            self._send_or_reply_stream(
-                task,
-                format_plan_reply_chunks(task),
-                reply,
-                stream_message_id=stream_message_id,
-            )
+            self._send_or_reply(task, reply)
             if self.auto_confirm:
-                self._send_progress_update(
-                    task,
-                    "已进入自动执行模式，我会继续生成 Doc、Slides 和 Canvas，并在完成后把链接发回当前 IM。",
-                )
+                self._send_or_reply(task, "已开始执行，正在并行生成 Doc、Slides 和 Canvas...")
                 if self.background_auto_confirm:
                     self._start_background_confirm(task.task_id)
                     return self._response(task, format_progress_reply(task))
@@ -156,6 +147,7 @@ class AgentPilotOrchestrator:
     def _run_confirmed_task(self, task: AgentPilotTask) -> AgentPilotResponse:
         if task.status == "DONE":
             reply = format_final_reply(task)
+            self._send_or_reply(task, reply)
             return self._response(task, reply)
 
         task.artifacts = [
@@ -165,30 +157,101 @@ class AgentPilotOrchestrator:
         task.artifact_brief = build_artifact_brief(task)
         self.state_service.save_task(task)
 
-        self.state_service.update_status(task, "DOC_GENERATING")
-        self._send_progress_update(task, "Doc Agent 正在生成 Agent-Pilot 参赛方案文档。")
-        doc = build_doc_artifact(task)
-        self._execute_artifact(task, "create_doc", "Agent-Pilot 参赛方案", doc)
-        self.state_service.save_task(task)
+        self.state_service.update_status(task, "GENERATING")
+        card_id = self._send_generating_card(task)
 
-        self.state_service.update_status(task, "PRESENTATION_GENERATING")
-        self._send_progress_update(task, "Presentation Agent 正在生成 5 页答辩汇报材料。")
-        slides = build_slide_artifact(task)
-        self._execute_artifact(task, "create_slides", "Agent-Pilot 5 页答辩汇报材料", slides)
-        self.state_service.save_task(task)
+        results = self._generate_artifacts_in_parallel(task, card_id)
 
-        self.state_service.update_status(task, "CANVAS_GENERATING")
-        self._send_progress_update(task, "Canvas Agent 正在生成飞书画板架构图。")
-        canvas = build_canvas_artifact(task)
-        self._execute_artifact(task, "create_canvas", "Agent-Pilot 编排架构画板", canvas)
-        self.state_service.save_task(task)
+        for artifact, records in results:
+            task.artifacts.append(artifact)
+            task.tool_executions.extend(records)
 
+        self.state_service.save_task(task)
         self.state_service.update_status(task, "DELIVERING")
-        self._send_progress_update(task, "DeliveryService 正在汇总产物链接并回传到当前 IM。")
+
         reply = format_final_reply(task)
-        self._send_or_reply(task, reply)
+        if card_id:
+            try:
+                self.lark_client.update_message(card_id, reply)
+            except Exception:
+                self._send_or_reply(task, reply)
+        else:
+            self._send_or_reply(task, reply)
+
         self.state_service.update_status(task, "DONE")
+        suggestion = self._generate_proactive_suggestion(task)
+        if suggestion:
+            self._send_or_reply(task, suggestion)
         return self._response(task, reply)
+
+    def _send_generating_card(self, task: AgentPilotTask) -> str | None:
+        statuses = {"doc": "生成中...", "slides": "生成中...", "canvas": "生成中..."}
+        text = format_generating_card(statuses)
+        try:
+            result = self._send_or_reply_card_result(task, text, header_title="Agent-Pilot")
+            return _message_id_from_result(result)
+        except Exception:
+            self._send_or_reply(task, text)
+            return None
+
+    def _generate_artifacts_in_parallel(
+        self, task: AgentPilotTask, card_id: str | None
+    ) -> list[tuple]:
+        jobs = [
+            ("create_doc", "Agent-Pilot 项目方案", build_doc_artifact(task)),
+            ("create_slides", "Agent-Pilot 5 页汇报演示文稿", build_slide_artifact(task)),
+            ("create_canvas", "Agent-Pilot 编排架构画板", build_canvas_artifact(task)),
+        ]
+
+        results: list[tuple] = []
+        statuses: dict[str, str] = {"doc": "生成中...", "slides": "生成中...", "canvas": "生成中..."}
+        lock = threading.Lock()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+            futures = {
+                pool.submit(
+                    self._execute_artifact_isolated, task, capability, title, content
+                ): capability
+                for capability, title, content in jobs
+            }
+            for future in concurrent.futures.as_completed(futures):
+                capability = futures[future]
+                try:
+                    artifact, records = future.result()
+                    results.append((artifact, records))
+                    kind = _capability_to_kind(capability)
+                    with lock:
+                        statuses[kind] = f"✅ 已完成 → {artifact.url or '已生成'}"
+                except Exception:
+                    kind = _capability_to_kind(capability)
+                    with lock:
+                        statuses[kind] = "⚠️ 生成失败，已使用备用链接"
+
+                if card_id:
+                    try:
+                        card_text = format_generating_card(statuses)
+                        self.lark_client.update_message(card_id, card_text)
+                    except Exception:
+                        pass
+
+        return results
+
+    def _execute_artifact_isolated(
+        self,
+        task: AgentPilotTask,
+        capability: str,
+        title: str,
+        content: object,
+    ) -> tuple:
+        call = find_tool_call(task.plan.tool_plan if task.plan else None, capability)
+        artifact, records = self.tool_layer.execute_artifact(
+            call,
+            task_id=task.task_id,
+            title=title,
+            content=content,
+            task_dir=self.state_service.task_dir(task.task_id),
+        )
+        return artifact, records
 
     def get_task(self, task_id: str) -> AgentPilotResponse:
         task = self.state_service.load_task(task_id)
@@ -314,7 +377,7 @@ class AgentPilotOrchestrator:
             if existing:
                 artifact = self.lark_client.update_doc(task.task_id, existing, updated_content, task_dir)
             else:
-                self._execute_artifact(task, "create_doc", "Agent-Pilot 参赛方案", updated_content)
+                self._execute_artifact(task, "create_doc", "Agent-Pilot 项目方案", updated_content)
                 return
         elif patch.target_artifact == "slides":
             slides = _read_slides_artifact(existing) or build_slide_artifact(task)
@@ -322,7 +385,7 @@ class AgentPilotOrchestrator:
             if existing:
                 artifact = self.lark_client.update_slides(task.task_id, existing, updated_slides, task_dir)
             else:
-                self._execute_artifact(task, "create_slides", "Agent-Pilot 5 页答辩汇报材料", updated_slides)
+                self._execute_artifact(task, "create_slides", "Agent-Pilot 5 页汇报演示文稿", updated_slides)
                 return
         else:
             mermaid = _read_text_artifact(existing) or build_canvas_artifact(task)
@@ -419,9 +482,9 @@ class AgentPilotOrchestrator:
             record for record in task.tool_executions if record.call_id not in target_call_ids
         ]
         if "doc" in targets:
-            self._execute_artifact(task, "create_doc", "Agent-Pilot 参赛方案", build_doc_artifact(task))
+            self._execute_artifact(task, "create_doc", "Agent-Pilot 项目方案", build_doc_artifact(task))
         if "slides" in targets:
-            self._execute_artifact(task, "create_slides", "Agent-Pilot 5 页答辩汇报材料", build_slide_artifact(task))
+            self._execute_artifact(task, "create_slides", "Agent-Pilot 5 页汇报演示文稿", build_slide_artifact(task))
         if "canvas" in targets:
             self._execute_artifact(task, "create_canvas", "Agent-Pilot 编排架构画板", build_canvas_artifact(task))
         self.state_service.save_task(task)
@@ -444,7 +507,7 @@ class AgentPilotOrchestrator:
                     self._execute_artifact(
                         task,
                         "create_doc",
-                        "Agent-Pilot 参赛方案",
+                        "Agent-Pilot 项目方案",
                         updated_content,
                     )
             elif patch.target_artifact == "slides":
@@ -459,7 +522,7 @@ class AgentPilotOrchestrator:
                     self._execute_artifact(
                         task,
                         "create_slides",
-                        "Agent-Pilot 5 页答辩汇报材料",
+                        "Agent-Pilot 5 页汇报演示文稿",
                         updated_slides,
                     )
             else:
@@ -507,68 +570,11 @@ class AgentPilotOrchestrator:
         elif task.chat_id:
             self.lark_client.send_message(task.chat_id, text)
 
-    def _send_progress_update(self, task: AgentPilotTask, text: str) -> None:
-        try:
-            self._send_or_reply(task, text)
-        except Exception:
-            pass
-
-    def _send_planning_ack(self, task: AgentPilotTask) -> str | None:
-        try:
-            result = self._send_or_reply_card_result(task, format_planning_ack())
-        except Exception:
-            self._send_or_reply(task, format_planning_ack())
-            return None
-        return _message_id_from_result(result)
-
-    def _send_or_reply_stream(
-        self,
-        task: AgentPilotTask,
-        chunks: list[str],
-        final_text: str,
-        *,
-        stream_message_id: str | None = None,
-    ) -> None:
-        if stream_message_id:
-            try:
-                stream_chunks = chunks[1:] if len(chunks) > 1 else [final_text]
-                for chunk in stream_chunks:
-                    if self.stream_delay_seconds:
-                        time.sleep(self.stream_delay_seconds)
-                    self.lark_client.update_message(stream_message_id, chunk)
-                return
-            except Exception:
-                self._send_or_reply(task, final_text)
-                return
-
-        if len(chunks) < 2:
-            self._send_or_reply(task, final_text)
-            return
-
-        try:
-            result = self._send_or_reply_card_result(task, chunks[0])
-        except Exception:
-            self._send_or_reply(task, final_text)
-            return
-
-        stream_message_id = _message_id_from_result(result)
-        if not stream_message_id:
-            self._send_or_reply(task, final_text)
-            return
-
-        try:
-            for chunk in chunks[1:]:
-                if self.stream_delay_seconds:
-                    time.sleep(self.stream_delay_seconds)
-                self.lark_client.update_message(stream_message_id, chunk)
-        except Exception:
-            self._send_or_reply(task, final_text)
-
-    def _send_or_reply_card_result(self, task: AgentPilotTask, text: str) -> dict:
+    def _send_or_reply_card_result(self, task: AgentPilotTask, text: str, *, header_title: str | None = None) -> dict:
         if task.message_id:
-            return self.lark_client.reply_interactive_card(task.message_id, text)
+            return self.lark_client.reply_interactive_card(task.message_id, text, header_title=header_title)
         if task.chat_id:
-            return self.lark_client.send_interactive_card(task.chat_id, text)
+            return self.lark_client.send_interactive_card(task.chat_id, text, header_title=header_title)
         return {}
 
     def _response(self, task: AgentPilotTask, reply: str) -> AgentPilotResponse:
@@ -583,6 +589,29 @@ class AgentPilotOrchestrator:
             reply=reply,
             error=task.error,
         )
+
+    def _generate_proactive_suggestion(self, task: AgentPilotTask) -> str:
+        try:
+            summaries = "；".join(a.summary for a in task.artifacts if a.summary)
+            if not summaries:
+                return ""
+            llm = JobResearchLLM(temperature=0.3, max_tokens=512)
+            messages = [
+                {
+                    "role": "system",
+                    "content": "你是 Agent-Pilot。根据刚刚完成的任务和产物，生成一条后续建议（1-2 句话）。例如：检测到方案中未涉及某方面，是否需要补充？如果不需要建议，返回空字符串。",
+                },
+                {
+                    "role": "user",
+                    "content": f"用户需求：{task.input_text}\n产物摘要：{summaries}\n请生成后续建议。",
+                },
+            ]
+            result = llm.invoke(messages).strip()
+            if len(result) < 5:
+                return ""
+            return f"\U0001F4AD {result}"
+        except Exception:
+            return ""
 
 
 def _message_id_from_result(result: dict) -> str | None:
@@ -605,6 +634,14 @@ def _capability_for_kind(kind: ArtifactKind) -> str:
     if kind == "slides":
         return "create_slides"
     return "create_canvas"
+
+
+def _capability_to_kind(capability: str) -> str:
+    if capability == "create_doc":
+        return "doc"
+    if capability == "create_slides":
+        return "slides"
+    return "canvas"
 
 
 def _artifact_by_kind(

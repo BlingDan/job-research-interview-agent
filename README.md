@@ -14,7 +14,7 @@
 
 ## 项目简介
 
-Agent-Pilot 是面向飞书/Lark 的办公协同智能助手，聚焦 **基于 IM 的办公协同智能助手** 比赛赛题。它把飞书作为主要交互界面：用户在 IM 中提出目标，Agent 理解任务、规划步骤、生成办公产物，并把结果回传到同一个会话。
+Agent-Pilot 是面向飞书/Lark 的办公协同智能助手，围绕飞书/Lark IM 的核心交互场景。它把飞书作为主要交互界面：用户在 IM 中提出目标，Agent 理解任务、规划步骤、生成办公产物，并把结果回传到同一个会话。
 
 核心目标不是再做一个外部工作台，而是一个真正 Feishu-native 的 Agent 工作流：
 
@@ -34,16 +34,16 @@ Feishu IM
 - **办公套件联动**：生成飞书 Doc、Slides、Canvas/Whiteboard 等交付物。
 - **多端协同体验**：桌面端和移动端共享同一飞书会话、状态和产物链接。
 - **进度与修改闭环**：支持 `当前进度`、`确认`、`修改：...`、`/reset` 等交互。
-- **演示稳定性**：官方 MCP、`lark-cli`、fake artifact 多层 fallback，避免权限问题中断现场演示。
+- **演示稳定性**：官方 MCP、`lark-cli`、fake artifact 多层 fallback，保障演示和实际使用的稳定性。
 
-## 比赛场景映射
+## 功能场景
 
-| 场景 | 赛题要求 | Agent-Pilot 对应实现 |
+| 场景 | 场景说明 | Agent-Pilot 对应实现 |
 | --- | --- | --- |
 | A | 意图 / 指令入口 | 飞书 IM 消息触发 Agent-Pilot 任务 |
 | B | 任务理解和规划 | Planner Agent 生成执行计划与 ToolPlan |
 | C | 文档 / 白板生成 | DocAgent 与 CanvasAgent 生成方案文档和架构画板 |
-| D | 汇报材料生成 | PresentationAgent 生成 5 页答辩 Slides |
+| D | 汇报材料生成 | PresentationAgent 生成 5 页项目汇报 Slides |
 | E | 多端协同 | `chat_id` 绑定任务状态、产物链接和修改上下文 |
 | F | 总结与交付 | DeliveryService 将最终成果回传到同一 IM 会话 |
 
@@ -63,7 +63,7 @@ uv run python scripts/lark_event_listener.py
 推荐演示口令：
 
 ```text
-@Agent 帮我基于飞书比赛赛题，生成一份参赛方案文档和 5 页答辩汇报材料。重点突出 Agent 编排、多端协同、飞书办公套件联动和工程实现。
+@Agent 帮我生成一份产品方案文档和 5 页项目汇报材料。重点突出 Agent 编排、多端协同、飞书办公套件联动和工程实现。
 ```
 
 ## 技术栈

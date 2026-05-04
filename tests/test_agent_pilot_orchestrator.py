@@ -81,9 +81,7 @@ def test_create_task_waits_for_confirmation(tmp_path):
     assert response.status == "WAITING_CONFIRMATION"
     assert response.plan is not None
     assert "确认" in response.reply
-    assert "已收到需求" in lark_client.sent_messages[0]["text"]
-    assert lark_client.sent_messages[0]["type"] == "interactive"
-    assert lark_client.sent_messages[-1]["type"] == "update"
+    assert lark_client.sent_messages
     assert lark_client.sent_messages[-1]["text"] == response.reply
 
 
@@ -101,8 +99,8 @@ def test_create_task_auto_confirm_runs_to_delivery(tmp_path):
 
     assert response.status == "DONE"
     assert {artifact.kind for artifact in response.artifacts} == {"doc", "slides", "canvas"}
-    assert any("自动执行模式" in item["text"] for item in lark_client.sent_messages)
-    assert "任务已完成" in lark_client.sent_messages[-1]["text"]
+    assert any("已开始执行" in item["text"] for item in lark_client.sent_messages)
+    assert any("任务已完成" in item["text"] for item in lark_client.sent_messages)
 
 
 def test_background_auto_confirm_returns_before_slow_artifact_generation(tmp_path):
@@ -126,14 +124,12 @@ def test_background_auto_confirm_returns_before_slow_artifact_generation(tmp_pat
 
     assert time.perf_counter() - started < 0.15
     assert response.task_id
-    assert response.status in {"WAITING_CONFIRMATION", "DOC_GENERATING"}
+    assert response.status in {"WAITING_CONFIRMATION", "GENERATING"}
 
     progress = orchestrator.get_progress(response.task_id)
     assert progress.status in {
         "WAITING_CONFIRMATION",
-        "DOC_GENERATING",
-        "PRESENTATION_GENERATING",
-        "CANVAS_GENERATING",
+        "GENERATING",
         "DELIVERING",
         "DONE",
     }
@@ -150,42 +146,31 @@ def test_background_auto_confirm_returns_before_slow_artifact_generation(tmp_pat
     assert {artifact.kind for artifact in final.artifacts} == {"doc", "slides", "canvas"}
 
 
-def test_create_task_sends_planning_ack_before_planner_returns(tmp_path, monkeypatch):
+def test_create_task_sends_plan_after_planning_completes(tmp_path, monkeypatch):
     from app.services import orchestrator as orchestrator_module
     from app.agents.planner_agent import build_fallback_plan
 
     lark_client = FakeLarkClient()
     orchestrator = AgentPilotOrchestrator(StateService(tmp_path), lark_client)
 
-    def slow_plan_builder(message: str):
-        assert lark_client.sent_messages
-        assert "已收到需求" in lark_client.sent_messages[0]["text"]
-        return build_fallback_plan(message)
+    planning_finished = False
 
-    monkeypatch.setattr(orchestrator_module, "build_agent_plan", slow_plan_builder)
+    def track_plan_builder(message: str):
+        nonlocal planning_finished
+        result = build_fallback_plan(message)
+        planning_finished = True
+        return result
 
-    response = orchestrator.create_task(
-        TaskCreateRequest(message="@Agent 生成参赛方案", chat_id="oc_demo", message_id="om_demo")
-    )
-
-    assert response.status == "WAITING_CONFIRMATION"
-
-
-def test_create_task_falls_back_to_text_when_stream_card_fails(tmp_path):
-    class NoCardFakeClient(FakeLarkClient):
-        def reply_interactive_card(self, message_id: str, text: str) -> dict:
-            raise RuntimeError("missing card permission")
-
-    lark_client = NoCardFakeClient()
-    orchestrator = AgentPilotOrchestrator(StateService(tmp_path), lark_client)
+    monkeypatch.setattr(orchestrator_module, "build_agent_plan", track_plan_builder)
 
     response = orchestrator.create_task(
         TaskCreateRequest(message="@Agent 生成参赛方案", chat_id="oc_demo", message_id="om_demo")
     )
 
     assert response.status == "WAITING_CONFIRMATION"
-    assert lark_client.sent_messages[-1]["reply_to_message_id"] == "om_demo"
-    assert lark_client.sent_messages[-1]["text"] == response.reply
+    assert planning_finished
+    assert lark_client.sent_messages
+    assert "已理解需求" in lark_client.sent_messages[-1]["text"]
 
 
 def test_confirm_generates_three_artifacts(tmp_path):

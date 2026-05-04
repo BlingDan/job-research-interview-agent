@@ -77,7 +77,7 @@ class FakeLarkClient:
             token=f"fake-doc-{task_id}",
             local_path=str(path),
             status="fake",
-            summary="已生成参赛方案文档。",
+            summary="已生成项目方案文档。",
             metadata={"source_format": "markdown"},
         )
 
@@ -98,7 +98,7 @@ class FakeLarkClient:
             token=f"fake-slides-{task_id}",
             local_path=str(path),
             status="fake",
-            summary="已生成 5 页答辩汇报材料。",
+            summary="已生成 5 页汇报演示文稿。",
             metadata={
                 "source_format": "json",
                 "slide_ids": [f"fake-slide-{index}" for index, _ in enumerate(slides, start=1)],
@@ -133,7 +133,7 @@ class FakeLarkClient:
             update={
                 "local_path": str(path),
                 "status": "updated",
-                "summary": "已原地更新参赛方案文档。",
+                "summary": "已原地更新项目方案文档。",
                 "metadata": {**artifact.metadata, "source_format": "markdown"},
             }
         )
@@ -161,7 +161,7 @@ class FakeLarkClient:
             update={
                 "local_path": str(path),
                 "status": "updated",
-                "summary": "已原地更新 5 页答辩汇报材料。",
+                "summary": "已原地更新 5 页汇报演示文稿。",
                 "metadata": metadata,
             }
         )

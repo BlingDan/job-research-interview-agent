@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     agent_pilot_default_chat_id: str | None = None
     agent_pilot_auto_confirm: bool = False
     agent_pilot_background_auto_confirm: bool = False
-    agent_pilot_planner_mode: Literal["fallback", "auto", "llm"] = "fallback"
+    agent_pilot_planner_mode: Literal["fallback", "auto", "llm"] = "auto"
     agent_pilot_router_mode: Literal["fallback", "auto", "llm"] = "auto"
     agent_pilot_router_timeout_seconds: float = 15.0
     feishu_tool_mode: Literal["hybrid", "mcp", "lark_cli", "fake"] = "hybrid"

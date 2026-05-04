@@ -9,8 +9,8 @@ def test_fallback_plan_covers_doc_slides_canvas():
     plan = build_fallback_plan("生成参赛方案")
 
     artifacts = {step.expected_artifact for step in plan.steps}
-    assert "参赛方案文档" in artifacts
-    assert "5 页答辩汇报材料" in artifacts
+    assert "项目方案文档" in artifacts
+    assert "5 页汇报演示文稿" in artifacts
     assert "Agent 编排架构图" in artifacts
     assert "确认" in plan.confirmation_prompt
     assert plan.tool_plan is not None
@@ -107,7 +107,7 @@ def test_build_agent_plan_auto_falls_back_when_llm_fails(monkeypatch):
     assert plan.summary == build_fallback_plan("生成参赛方案").summary
 
 
-def test_doc_fallback_contains_competition_keywords():
+def test_doc_fallback_contains_keywords():
     task = AgentPilotTask(task_id="task-1", input_text="飞书比赛")
 
     doc = build_fallback_doc(task)

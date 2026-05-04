@@ -56,13 +56,31 @@ def format_progress_reply(task: AgentPilotTask) -> str:
     return "\n".join(lines)
 
 
-def format_final_reply(task: AgentPilotTask) -> str:
-    lines = ["任务已完成，成果如下："]
-    for artifact in task.artifacts:
-        link = artifact.url or artifact.local_path or "暂无链接"
-        lines.append(f"- {artifact.title}: {link}")
+_ARTIFACT_EMOJI: dict[str, str] = {"doc": "\U0001F4C4", "slides": "\U0001F4CA", "canvas": "\U0001F3A8"}
+_ARTIFACT_LABEL: dict[str, str] = {"doc": "Doc 项目方案", "slides": "Slides 汇报演示", "canvas": "Canvas 架构图"}
+
+
+def format_generating_card(artifact_statuses: dict[str, str]) -> str:
+    lines = []
+    for kind in ("doc", "slides", "canvas"):
+        emoji = _ARTIFACT_EMOJI.get(kind, "\U0001F4CC")
+        label = _ARTIFACT_LABEL.get(kind, kind)
+        status = artifact_statuses.get(kind, "生成中...")
+        lines.append(f"{emoji} **{label}**：{status}")
     lines.append("")
-    lines.append("你可以继续在当前 IM 里发送「修改：...」来迭代内容。")
+    lines.append("请稍候，产物将逐一更新...")
+    return "\n".join(lines)
+
+
+def format_final_reply(task: AgentPilotTask) -> str:
+    lines = ["✅ 任务已完成，成果如下："]
+    for artifact in task.artifacts:
+        emoji = _ARTIFACT_EMOJI.get(artifact.kind, "")
+        link = artifact.url or artifact.local_path or "暂无链接"
+        lines.append(f"{emoji} **{artifact.title}**：{link}")
+    if task.artifacts:
+        lines.append("")
+    lines.append("✏️ 发送「修改：...」继续迭代 | 📊 发送「现在做到哪了？」查看状态")
     return "\n".join(lines)
 
 
@@ -88,7 +106,7 @@ def format_help_reply() -> str:
     return "\n".join(
         [
             "Agent-Pilot 可用命令：",
-            "- 直接发送办公协同任务：生成方案文档、5 页答辩材料和画板",
+            "- 直接发送办公协同任务：生成方案文档、5 页汇报材料和画板",
             "- 确认：开始执行当前计划",
             "- 当前进度 / /status：查看当前任务状态",
             "- 修改：...：按你的反馈迭代产物，也可以不加「修改：」直接说要改哪个文档、PPT 或画板",

@@ -20,7 +20,7 @@ def test_plan_reply_includes_confirmation():
     reply = format_plan_reply(task)
 
     assert "确认" in reply
-    assert "生成参赛方案文档" in reply
+    assert "生成项目方案文档" in reply
 
 
 def test_plan_reply_chunks_are_cumulative():

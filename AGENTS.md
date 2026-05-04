@@ -23,52 +23,70 @@ as `rg` or PowerShell `Select-String`.
 
 ## North Star
 
-This repository is being rebuilt for the Feishu/Lark competition. Every product,
-architecture, and implementation decision must start from one question:
+Every product, architecture, and implementation decision must start from one question:
 
 ```text
-Will this make Agent-Pilot more convincing as an award-winning Feishu-native
+Will this make Agent-Pilot a more capable and intuitive Feishu-native
 office collaboration Agent?
 ```
-
-Code cleanliness matters, but it is secondary to a strong competition demo.
 
 ## Product Goal
 
 Turn this runnable repo into **Agent-Pilot**, a Feishu/Lark-native office
 collaboration agent.
 
-The winning demo flow is:
+The core product flow is:
 
 ```text
 Feishu IM
 -> Agent intent capture
--> Agent task plan
--> IM confirmation
--> Feishu Doc proposal
--> Feishu Slides deck
--> Feishu Canvas/Whiteboard architecture diagram
--> final IM delivery
+-> Agent plan (quick LLM call, structured markdown reply in IM)
+-> IM confirmation (简短确认 or auto-confirm)
+-> Agent sends interactive card: "正在生成方案..."
+-> Doc + Slides + Canvas generated IN PARALLEL (threads)
+   (independent artifacts, no reason to queue)
+-> Agent update_message: card now shows all links
 -> progress query and revision in the same chat
 ```
+
+The demo impact: "@Agent 生成方案" → [plan in 3-5s] → 确认 → "正在生成" card
+→ [parallel generation 10-15s] → card updates with all links. Under 20 seconds
+total. No Canvas-as-dashboard, no HTML page, no leaving IM.
 
 ## Product Rule
 
 **Feishu is the UI.**
 
-Use Feishu desktop and mobile clients for the multi-end experience. Do not build
-custom desktop dashboards, mobile apps, admin panels, polished PPT editors, or
-frontend-heavy substitutes for Feishu.
+The entire user experience lives inside Feishu. Do not build a standalone web
+dashboard, custom desktop app, or browser-based workbench — pulling the user out
+of Feishu to a separate page contradicts the "IM-based" narrative.
 
-Feishu surfaces:
+Feishu surfaces and their roles:
 
-- **IM**: task start, plan confirmation, progress query, revision, final delivery.
-- **Doc**: generated or updated proposal document.
-- **Slides**: generated 5-page defense/report deck.
-- **Canvas/Whiteboard**: generated architecture or workflow diagram.
-- **Backend**: Agent brain, orchestration, state, and Feishu tool calls.
+| Surface | Role |
+|---------|------|
+| **IM** | Entry, interaction, AND progress visualization. All user-facing status lives here. |
+| **Doc** | Generated proposal document. Editable by user after creation. |
+| **Slides** | Generated 5-page defense/report deck. |
+| **Canvas/Whiteboard** | Generated architecture or workflow diagram (Mermaid). |
+| **Backend** | Agent brain, orchestration, state, tool calls. |
 
-## Competition Requirements Mapping
+### How to show Agent progress inside IM (no separate dashboard)
+
+Send a single interactive card (`msg_type: interactive`) when task execution
+starts. When all artifacts are complete, update the same card with links.
+
+The real key is not the card — it's **parallel artifact generation**.
+Doc, Slides, and Canvas are independent. Generating them sequentially wastes
+30+ seconds of demo time with the user staring at "generating...". Generate
+them concurrently (threads or asyncio), then deliver all links at once.
+
+The card pattern:
+1. Task confirmed → send card "正在分析需求并生成方案..."
+2. All artifacts complete → `update_message` to show the delivery receipt
+   with Doc/Slides/Canvas links in one shot.
+
+## Feature Scenario Mapping (aligned with A-F requirements)
 
 Keep the implementation and demo aligned with the official A-F scenarios:
 
@@ -81,7 +99,7 @@ Keep the implementation and demo aligned with the official A-F scenarios:
 | E | Multi-end collaboration | Keep state, artifacts, revisions, and links bound to the same Feishu chat. |
 | F | Summary and delivery | Send final summary and artifact links back to the same IM thread/chat. |
 
-The demo must make these mappings obvious to judges.
+The demo must make these mappings clear to users.
 
 ## Refactor Direction
 
@@ -104,7 +122,9 @@ Non-core or removable from the main path:
 - Tavily web search as a required step.
 - Local RAG as a required step.
 - Job JD, company research, and interview-specific schemas.
-- Browser/SSE/dashboard-style progress UI that competes with Feishu IM.
+- Browser/SSE/dashboard-style progress UI that pulls the user outside Feishu.
+  Progress visualization should happen on Feishu surfaces (Canvas status board,
+  rich IM cards, live-updated Doc) instead.
 
 ## Required Capabilities
 
@@ -116,6 +136,9 @@ Non-core or removable from the main path:
 - Generate or update a Feishu Doc proposal.
 - Generate a 5-page Feishu Slides deck.
 - Generate a Canvas/Whiteboard architecture or workflow artifact.
+- Send live progress updates by mutating a single interactive card via
+  `update_message` — each pipeline stage adds a checkmark and artifact link
+  to the same card, so the user watches progress in real time without leaving IM.
 - Send final artifact links and summary back to the same IM chat.
 - Demonstrate desktop/mobile consistency through the same Feishu chat and
   artifacts.
@@ -125,7 +148,7 @@ Non-core or removable from the main path:
 Optimize the first-class path for:
 
 ```text
-@Agent 帮我基于飞书比赛赛题，生成一份参赛方案文档和 5 页答辩汇报材料。重点突出 Agent 编排、多端协同、飞书办公套件联动和工程实现。
+@Agent 帮我生成一份智能客服系统的产品方案文档和 5 页项目汇报材料。重点突出 Agent 编排、多端协同、飞书办公套件联动和工程实现。
 ```
 
 ## Agent Behavior
@@ -159,9 +182,7 @@ Use an explicit state machine:
 CREATED
 -> PLANNING
 -> WAITING_CONFIRMATION
--> DOC_GENERATING
--> PRESENTATION_GENERATING
--> CANVAS_GENERATING
+-> GENERATING (Doc + Slides + Canvas in parallel)
 -> DELIVERING
 -> DONE
 ```
@@ -181,7 +202,7 @@ detail for debugging without exposing secrets.
 Use `lark-cli` first. Inspect actual commands with `--help` or `schema` before
 hardcoding request shapes.
 
-First competition-oriented integration path:
+First integration path:
 
 - IM entry: `lark-cli event +subscribe` reads Feishu event NDJSON.
 - IM reply/send: `lark-cli im +messages-reply` and `lark-cli im +messages-send`.
@@ -245,10 +266,10 @@ flow unless a production webhook is explicitly requested.
 
 - Keep the app runnable at every step.
 - Prefer small, reviewable changes, unless a larger change clearly improves the
-  competition demo.
+  product demo.
 - Do not preserve old abstractions merely because they exist.
-- Do not build custom desktop/mobile dashboards.
-- Do not build a complex frontend.
+- Do not build a standalone web dashboard, custom desktop app, or mobile app.
+  All user-facing UI lives inside Feishu (IM, Doc, Slides, Canvas).
 - Do not build a polished PPT editor.
 - Do not make Tavily/RAG mandatory in the core demo path.
 - Keep fake/dry-run mode for tests, local demos, and blocked Feishu calls.
@@ -286,8 +307,7 @@ A change is not complete unless it helps one of these outcomes:
 - The Agent planning behavior is more convincing.
 - Doc, Slides, or Canvas artifact generation is more complete.
 - Progress query, confirmation, or revision behavior is more reliable.
-- The A-F competition mapping is clearer.
+- The A-F feature scenario mapping is clearer.
 - Tests protect the fake/dry-run path and core state transitions.
 
-When tradeoffs appear, choose the option that creates the strongest award-worthy
-demo while keeping the app runnable.
+When tradeoffs appear, choose the option that creates the most compelling product experience while keeping the app runnable.
