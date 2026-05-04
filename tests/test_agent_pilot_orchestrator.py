@@ -25,10 +25,11 @@ class _FakeRevisionLLM:
 
 @pytest.fixture(autouse=True)
 def _patch_revision_llm(monkeypatch):
-    """Avoid real LLM calls in build_llm_revision_content across all orchestrator tests."""
-    from app.agents import artifact_revision_agent
+    """Avoid real LLM calls across all orchestrator tests."""
+    from app.agents import artifact_revision_agent, canvas_agent, doc_agent, presentation_agent
 
-    monkeypatch.setattr(artifact_revision_agent, "JobResearchLLM", _FakeRevisionLLM)
+    for mod in (artifact_revision_agent, doc_agent, presentation_agent, canvas_agent):
+        monkeypatch.setattr(mod, "JobResearchLLM", _FakeRevisionLLM)
 
 
 def _orchestrator(tmp_path):
