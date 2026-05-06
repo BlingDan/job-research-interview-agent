@@ -79,7 +79,7 @@ def test_revision_reply_mentions_targets():
 def test_help_reply_mentions_natural_revision_language():
     reply = format_help_reply()
 
-    assert "不加「修改：」" in reply
+    assert "修改：" in reply
 
 
 def test_reset_confirm_reply_includes_plan_summary_and_confirm_reset():

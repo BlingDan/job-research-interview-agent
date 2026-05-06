@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent-Pilot Cockpit Fallback</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #081421;
+        --panel: rgba(10, 28, 43, 0.92);
+        --text: #edf6ff;
+        --muted: #9bb3c8;
+        --accent: #4fd1c5;
+        --line: rgba(138, 180, 212, 0.2);
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "Segoe UI", "PingFang SC", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(79, 209, 197, 0.18), transparent 35%),
+          linear-gradient(160deg, #07111d 0%, #0a1d2f 52%, #102f3f 100%);
+        display: grid;
+        place-items: center;
+      }
+      main {
+        width: min(720px, calc(100vw - 32px));
+        padding: 32px;
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background: var(--panel);
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+      }
+      h1 {
+        margin: 0 0 12px;
+        font-size: 32px;
+      }
+      p {
+        color: var(--muted);
+        line-height: 1.7;
+      }
+      code {
+        color: var(--accent);
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Agent-Pilot Cockpit</h1>
+      <p>
+        The React cockpit source exists under <code>clients/agent_pilot_cockpit</code>.
+        Build it with <code>bun install</code> and <code>bun run build</code> to replace this fallback shell.
+      </p>
+      <p>
+        API entrypoints:
+        <a href="/api/cockpit/tasks">/api/cockpit/tasks</a>,
+        <a href="/api/windows/home">/api/windows/home</a>,
+        <a href="/api/mobile/home">/api/mobile/home</a>.
+      </p>
+    </main>
+  </body>
+</html>

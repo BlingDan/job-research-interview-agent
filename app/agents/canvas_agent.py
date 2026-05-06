@@ -2,33 +2,24 @@ from __future__ import annotations
 
 import json
 
+from app.agents.base_artifact_agent import BaseArtifactAgent
 from app.core.llm import JobResearchLLM
 from app.schemas.agent_pilot import AgentPilotTask, ArtifactBrief
-from app.services.artifact_brief_builder import build_artifact_brief
 
 
-def build_canvas_artifact(task: AgentPilotTask) -> str:
-    try:
-        result = build_llm_canvas(task)
-        lower = result.lower()
-        if "flowchart" in lower or "graph" in lower:
-            return result
-    except Exception:
-        pass
-    return build_fallback_canvas(task)
+class CanvasAgent(BaseArtifactAgent[str]):
+    _agent_name = "CanvasAgent"
 
-
-def build_llm_canvas(task: AgentPilotTask) -> str:
-    brief = _brief(task)
-    llm = JobResearchLLM(temperature=0.3, max_tokens=4096)
-    messages = [
-        {
-            "role": "system",
-            "content": "你是 Agent-Pilot 的 Canvas Agent。根据用户的原始需求和 ArtifactBrief 生成一个 Mermaid flowchart 架构图。展示 IM、Agent 编排、飞书办公套件联动、多端协同和 fallback 机制。只返回 Mermaid 代码，不要额外解释，不要用代码块包裹。",
-        },
-        {
-            "role": "user",
-            "content": f"""原始需求：
+    def _build_llm(self, task: AgentPilotTask, brief: ArtifactBrief) -> str:
+        llm = JobResearchLLM(temperature=0.3, max_tokens=4096)
+        messages = [
+            {
+                "role": "system",
+                "content": "你是 Agent-Pilot 的 Canvas Agent。根据用户的原始需求和 ArtifactBrief 生成一个 Mermaid flowchart 架构图。展示 IM、Agent 编排、飞书办公套件联动、多端协同和 fallback 机制。只返回 Mermaid 代码，不要额外解释，不要用代码块包裹。",
+            },
+            {
+                "role": "user",
+                "content": f"""原始需求：
 {task.input_text}
 
 方案摘要：
@@ -46,29 +37,22 @@ Agent 架构：
 风险与 fallback：
 {json.dumps(brief.risk_and_fallback_story, ensure_ascii=False)}
 
+一致性约束（以下核心事实必须在画板中保持一致）：
+{json.dumps(brief.consistency_anchors, ensure_ascii=False)}
+
 请生成 Mermaid flowchart 架构图。""",
-        },
-    ]
-    raw = llm.invoke(messages).strip()
-    return _strip_mermaid_fence(raw)
+            },
+        ]
+        raw = llm.invoke(messages).strip()
+        return _strip_mermaid_fence(raw)
 
+    def _validate(self, result: str) -> bool:
+        lower = result.lower()
+        return "flowchart" in lower or "graph" in lower
 
-def _strip_mermaid_fence(text: str) -> str:
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        lines = stripped.split("\n")
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].startswith("```"):
-            lines = lines[:-1]
-        return "\n".join(lines)
-    return stripped
-
-
-def build_fallback_canvas(task: AgentPilotTask) -> str:
-    brief = _brief(task)
-    must_have = "<br/>".join(brief.must_have_points[:3])
-    return f"""flowchart LR
+    def _build_fallback(self, task: AgentPilotTask, brief: ArtifactBrief) -> str:
+        must_have = "<br/>".join(brief.must_have_points[:3])
+        return f"""flowchart LR
     subgraph A["A-F: IM Intent Entry"]
         IM["Feishu IM / Lark IM<br/>Desktop + Mobile"]
         Parser["TaskMessageService<br/>command + context binding"]
@@ -119,5 +103,24 @@ def build_fallback_canvas(task: AgentPilotTask) -> str:
 """
 
 
-def _brief(task: AgentPilotTask) -> ArtifactBrief:
-    return task.artifact_brief or build_artifact_brief(task)
+_canvas_agent = CanvasAgent()
+
+
+def build_canvas_artifact(task: AgentPilotTask) -> str:
+    return _canvas_agent.build(task)
+
+
+def build_fallback_canvas(task: AgentPilotTask) -> str:
+    return _canvas_agent._build_fallback(task, _canvas_agent._brief(task))
+
+
+def _strip_mermaid_fence(text: str) -> str:
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        lines = stripped.split("\n")
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].startswith("```"):
+            lines = lines[:-1]
+        return "\n".join(lines)
+    return stripped

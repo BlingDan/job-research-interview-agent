@@ -36,6 +36,15 @@ def build_artifact_brief(task: AgentPilotTask) -> ArtifactBrief:
         "突出工程实现：FastAPI、显式状态机、LarkClient 抽象、真实 IM、真实/假 artifact fallback。",
     ]
 
+    consistency_anchors = {
+        "产品定位": "基于飞书 IM 的 Agent 编排办公助手",
+        "核心架构": "FastAPI + LangChain + MCP + lark-cli 三层 fallback",
+        "Agent 数量": "3 个专用 Agent（Doc/Presentation/Canvas）+ Planner + Router",
+        "执行流程": "5 步 Pipeline：意图 → 规划 → 确认 → 并行生成 → 交付",
+        "产物类型": "Doc 方案文档 + Slides 汇报演示 + Canvas 架构画板",
+        "多端协同": "桌面端与移动端共享同一 Feishu 聊天任务状态",
+    }
+
     return ArtifactBrief(
         task_summary=task_summary,
         official_requirement_mapping=OFFICIAL_REQUIREMENT_MAPPING.copy(),
@@ -45,6 +54,7 @@ def build_artifact_brief(task: AgentPilotTask) -> ArtifactBrief:
             "最终交付消息诚实展示真实链接、fallback 链接和后续修改入口，保证演示稳定。",
             "用同一套 brief 驱动 Doc、Slides、Canvas，避免三个产物故事不一致。",
         ],
+        consistency_anchors=consistency_anchors,
         agent_architecture=[
             "TaskMessageService 接收 IM 文本，IntentRouterAgent 负责识别确认、进度查询、自然语言修改和 /reset 等命令。",
             f"PlannerAgent 生成执行计划并选择工具：{', '.join(planned_tools) if planned_tools else 'Feishu IM, Doc, Slides, Canvas/Whiteboard'}。",

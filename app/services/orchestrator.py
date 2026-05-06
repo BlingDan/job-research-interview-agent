@@ -3,6 +3,7 @@ from __future__ import annotations
 import concurrent.futures
 import json
 import threading
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -10,9 +11,11 @@ from pathlib import Path
 from app.agents.canvas_agent import build_canvas_artifact
 from app.agents.doc_agent import build_doc_artifact
 from app.agents.intent_router_agent import route_agent_pilot_message
-from app.agents.planner_agent import build_agent_plan
+from app.agents.agent_pilot_planner import build_agent_plan
 from app.agents.presentation_agent import build_slide_artifact
+from app.core.config import get_settings
 from app.core.llm import JobResearchLLM
+from app.core.logging import get_logger
 from app.agents.artifact_revision_agent import (
     ArtifactRevisionPatch,
     apply_canvas_patch,
@@ -29,18 +32,27 @@ from app.schemas.agent_pilot import (
     AgentPilotTask,
     ArtifactKind,
     ArtifactRef,
+    ChatMessage,
+    FeedbackRecord,
     RevisionRecord,
     TaskCreateRequest,
 )
 from app.services.artifact_brief_builder import build_artifact_brief
 from app.services.delivery_service import (
+    format_auto_execute_reply,
+    format_clarification_reply,
+    format_countdown_expired_reply,
+    format_countdown_reply,
     format_error_reply,
+    format_feedback_prompt,
+    format_feedback_thanks,
     format_final_reply,
     format_generating_card,
     format_help_reply,
     format_no_active_task_reply,
     format_plan_reply,
     format_progress_reply,
+    format_rehearse_reply,
     format_reset_confirm_reply,
     format_reset_expired_reply,
     format_reset_reply,
@@ -50,13 +62,15 @@ from app.services.delivery_service import (
 )
 from app.services.feishu_tool_layer import FeishuMcpToolAdapter, FeishuToolLayer, LarkCliToolAdapter
 from app.services.feishu_tool_registry import find_tool_call
-from app.services.state_service import StateService
+from app.shared.state_service import DbStateService
+
+logger = get_logger()
 
 
 class AgentPilotOrchestrator:
     def __init__(
         self,
-        state_service: StateService,
+        state_service: DbStateService,
         lark_client: LarkClient,
         *,
         stream_delay_seconds: float = 0.0,
@@ -76,10 +90,12 @@ class AgentPilotOrchestrator:
                 "fake": LarkCliToolAdapter(FakeLarkClient()),
             }
         )
+        self._countdown_timers: dict[str, threading.Timer] = {}
 
     def create_task(
         self, request: TaskCreateRequest, *, route_source: str | None = None
     ) -> AgentPilotResponse:
+        t0 = time.monotonic()
         task = AgentPilotTask(
             task_id=str(uuid.uuid4()),
             input_text=request.message,
@@ -88,20 +104,143 @@ class AgentPilotOrchestrator:
             user_id=request.user_id,
             status="CREATED",
         )
+        logger.info("Task created (task_id=%s, chat_id=%s).", task.task_id, task.chat_id)
         try:
             self.state_service.update_status(task, "PLANNING")
-            task.plan = build_agent_plan(request.message)
-            self.state_service.update_status(task, "WAITING_CONFIRMATION")
-            reply = with_fallback_notice(format_plan_reply(task), route_source)
-            self._send_or_reply(task, reply)
+
+            t1 = time.monotonic()
+            chat_history = self._fetch_chat_context(request)
+            t2 = time.monotonic()
+            task.plan = build_agent_plan(request.message, chat_history)
+            t3 = time.monotonic()
+            logger.info(
+                "Task plan built (task_id=%s, chat_context=%.1fs, plan=%.1fs).",
+                task.task_id,
+                t2 - t1,
+                t3 - t2,
+            )
+
+            settings = get_settings()
+            high_threshold = settings.agent_pilot_confidence_high_threshold
+            medium_threshold = settings.agent_pilot_confidence_medium_threshold
+
             if self.auto_confirm:
+                self.state_service.update_status(task, "GENERATING")
                 self._send_or_reply(task, "已开始执行，正在并行生成 Doc、Slides 和 Canvas...")
                 if self.background_auto_confirm:
                     self._start_background_confirm(task.task_id)
                     return self._response(task, format_progress_reply(task))
                 return self._run_confirmed_task(task)
+
+            if task.plan.clarification_questions:
+                self.state_service.update_status(task, "WAITING_CONFIRMATION")
+                reply = with_fallback_notice(
+                    format_clarification_reply(task), route_source
+                )
+                self._send_or_reply(task, reply)
+                return self._response(task, reply)
+
+            if task.plan.confidence > high_threshold:
+                self.state_service.update_status(task, "GENERATING")
+                reply = with_fallback_notice(
+                    format_auto_execute_reply(task), route_source
+                )
+                self._send_or_reply(task, reply)
+                return self._run_confirmed_task(task)
+
+            if task.plan.confidence >= medium_threshold:
+                self.state_service.update_status(task, "WAITING_CONFIRMATION")
+                countdown = settings.agent_pilot_countdown_seconds
+                reply = with_fallback_notice(
+                    format_countdown_reply(task, countdown), route_source
+                )
+                self._send_or_reply(task, reply)
+                self._start_background_countdown(task.task_id, countdown)
+                return self._response(task, reply)
+
+            self.state_service.update_status(task, "WAITING_CONFIRMATION")
+            reply = with_fallback_notice(format_plan_reply(task), route_source)
+            self._send_or_reply(task, reply)
             return self._response(task, reply)
         except Exception as exc:
+            logger.error(
+                "Task creation failed (task_id=%s, elapsed=%.1fs): %s",
+                task.task_id,
+                time.monotonic() - t0,
+                exc,
+                exc_info=True,
+            )
+            task.error = str(exc)
+            self.state_service.update_status(task, "FAILED")
+            reply = format_error_reply(task)
+            self._send_or_reply(task, reply)
+            return self._response(task, reply)
+
+    def handle_clarification(self, task_id: str, answer: str) -> AgentPilotResponse:
+        task = self.state_service.load_task(task_id)
+        try:
+            combined = f"{task.input_text}\n（补充说明：{answer}）"
+            task.plan = build_agent_plan(combined)
+            self.state_service.update_status(task, "WAITING_CONFIRMATION")
+            reply = format_plan_reply(task)
+            self._send_or_reply(task, reply)
+            return self._response(task, reply)
+        except Exception as exc:
+            task.error = str(exc)
+            self.state_service.update_status(task, "FAILED")
+            reply = format_error_reply(task)
+            self._send_or_reply(task, reply)
+            return self._response(task, reply)
+
+    def handle_feedback(
+        self, task_id: str, rating: str, comment: str = ""
+    ) -> AgentPilotResponse:
+        task = self.state_service.load_task(task_id)
+        feedback = FeedbackRecord(
+            feedback_id=str(uuid.uuid4()),
+            task_id=task_id,
+            rating=rating if rating in {"helpful", "needs_improvement"} else None,
+            comment=comment,
+        )
+        logger.info(
+            "Feedback received (task_id=%s, rating=%s).", task_id, rating
+        )
+        reply = format_feedback_thanks(rating)
+        self._send_or_reply(task, reply)
+        return self._response(task, reply)
+
+    def handle_rehearse(self, task_id: str) -> AgentPilotResponse:
+        task = self.state_service.load_task(task_id)
+        try:
+            slides_artifact = _artifact_by_kind(task.artifacts, "slides")
+            doc_artifact = _artifact_by_kind(task.artifacts, "doc")
+
+            doc_content = _read_text_artifact(doc_artifact) or ""
+            if len(doc_content) > 3000:
+                doc_content = doc_content[:3000]
+
+            llm = JobResearchLLM(temperature=0.7, max_tokens=1024)
+            messages = [
+                {
+                    "role": "system",
+                    "content": (
+                        "你是方案评审专家。基于提供的方案文档和 Slides 内容，扮演评委/老板/客户角色，"
+                        "提出 2-3 个尖锐但有价值的质疑问题。每个问题应针对方案中的潜在弱点、"
+                        "逻辑漏洞或未充分考虑的风险。问题要有建设性，帮助方案完善。"
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"方案文档摘要：{doc_content}\n请提出评审问题。",
+                },
+            ]
+            questions_text = llm.invoke(messages).strip()
+
+            reply = format_rehearse_reply(questions_text)
+            self._send_or_reply(task, reply)
+            return self._response(task, reply)
+        except Exception as exc:
+            logger.error("Rehearse failed (task_id=%s): %s", task_id, exc, exc_info=True)
             task.error = str(exc)
             self.state_service.update_status(task, "FAILED")
             reply = format_error_reply(task)
@@ -111,6 +250,9 @@ class AgentPilotOrchestrator:
     def confirm_task(self, task_id: str) -> AgentPilotResponse:
         task = self.state_service.load_task(task_id)
         try:
+            timer = self._countdown_timers.pop(task_id, None)
+            if timer is not None:
+                timer.cancel()
             return self._run_confirmed_task(task)
         except Exception as exc:
             task.error = str(exc)
@@ -118,6 +260,59 @@ class AgentPilotOrchestrator:
             reply = format_error_reply(task)
             self._send_or_reply(task, reply)
             return self._response(task, reply)
+
+    def _start_background_countdown(self, task_id: str, seconds: int) -> None:
+        timer = threading.Timer(seconds, self._on_countdown_expired, args=(task_id,))
+        timer.daemon = True
+        self._countdown_timers[task_id] = timer
+        timer.start()
+
+    def _on_countdown_expired(self, task_id: str) -> None:
+        self._countdown_timers.pop(task_id, None)
+        try:
+            task = self.state_service.load_task(task_id)
+            if task.status == "WAITING_CONFIRMATION":
+                self._send_or_reply(task, format_countdown_expired_reply())
+                self._run_confirmed_task(task)
+        except Exception as exc:
+            logger.error("Countdown auto-confirm failed (task_id=%s): %s", task_id, exc, exc_info=True)
+
+    def _fetch_chat_context(
+        self, request: TaskCreateRequest
+    ) -> list[ChatMessage]:
+        if not request.chat_id:
+            return list(request.chat_history)
+        settings = get_settings()
+        limit = settings.agent_pilot_chat_context_limit
+        chat_timeout = getattr(settings, "agent_pilot_chat_context_timeout_seconds", 5.0)
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(self.lark_client.fetch_recent_messages, request.chat_id, limit)
+                raw_messages = future.result(timeout=chat_timeout)
+        except concurrent.futures.TimeoutError:
+            logger.warning("Chat context fetch timed out after %.1fs for chat_id=%s.", chat_timeout, request.chat_id)
+            return list(request.chat_history) if request.chat_history else []
+        except Exception:
+            logger.debug("Failed to fetch chat context for chat_id=%s.", request.chat_id, exc_info=True)
+            return list(request.chat_history) if request.chat_history else []
+
+        fetched: list[ChatMessage] = []
+        try:
+            for msg in raw_messages:
+                fetched.append(
+                    ChatMessage(
+                        sender_name=str(msg.get("sender_name", "")),
+                        content=str(msg.get("content", "")),
+                        timestamp=msg.get("timestamp"),
+                    )
+                )
+        except Exception:
+            logger.debug("Failed to parse chat context for chat_id=%s.", request.chat_id, exc_info=True)
+            return list(request.chat_history) if request.chat_history else []
+
+        if not fetched and request.chat_history:
+            return list(request.chat_history)
+        return fetched
 
     def _start_background_confirm(self, task_id: str) -> None:
         thread = threading.Thread(
@@ -157,6 +352,7 @@ class AgentPilotOrchestrator:
         task.artifact_brief = build_artifact_brief(task)
         self.state_service.save_task(task)
 
+        logger.info("Task confirmed, generating artifacts (task_id=%s).", task.task_id)
         self.state_service.update_status(task, "GENERATING")
         card_id = self._send_generating_card(task)
 
@@ -169,7 +365,8 @@ class AgentPilotOrchestrator:
         self.state_service.save_task(task)
         self.state_service.update_status(task, "DELIVERING")
 
-        reply = format_final_reply(task)
+        settings = get_settings()
+        reply = format_final_reply(task, product_mode=settings.agent_pilot_product_mode)
         if card_id:
             try:
                 self.lark_client.update_message(card_id, reply)
@@ -179,9 +376,13 @@ class AgentPilotOrchestrator:
             self._send_or_reply(task, reply)
 
         self.state_service.update_status(task, "DONE")
+        logger.info("Task delivered (task_id=%s).", task.task_id)
         suggestion = self._generate_proactive_suggestion(task)
         if suggestion:
             self._send_or_reply(task, suggestion)
+
+        self._send_or_reply(task, format_feedback_prompt())
+
         return self._response(task, reply)
 
     def _send_generating_card(self, task: AgentPilotTask) -> str | None:
@@ -197,9 +398,13 @@ class AgentPilotOrchestrator:
     def _generate_artifacts_in_parallel(
         self, task: AgentPilotTask, card_id: str | None
     ) -> list[tuple]:
+        product_mode = get_settings().agent_pilot_product_mode
+        doc_title = _dynamic_doc_title(task) if product_mode else "Agent-Pilot 项目方案"
+        slides_title = _dynamic_slides_title(task) if product_mode else "Agent-Pilot 汇报演示文稿"
+
         jobs = [
-            ("create_doc", "Agent-Pilot 项目方案", build_doc_artifact(task)),
-            ("create_slides", "Agent-Pilot 5 页汇报演示文稿", build_slide_artifact(task)),
+            ("create_doc", doc_title, build_doc_artifact(task)),
+            ("create_slides", slides_title, build_slide_artifact(task)),
             ("create_canvas", "Agent-Pilot 编排架构画板", build_canvas_artifact(task)),
         ]
 
@@ -287,6 +492,7 @@ class AgentPilotOrchestrator:
 
             used_fallback = False
             summaries: list[str] = []
+            change_details: list[str] = []
             for target in targets:
                 current = self._read_artifact_content(task, target)
                 if current is None:
@@ -304,6 +510,9 @@ class AgentPilotOrchestrator:
                     try:
                         self._overwrite_artifact_content(task, target, rewritten)
                         summaries.append(change_summary or f"已重写 {target} 内容。")
+                        change_details.append(
+                            _build_change_detail(target, instruction, change_summary)
+                        )
                         continue
                     except Exception:
                         used_fallback = True
@@ -315,23 +524,31 @@ class AgentPilotOrchestrator:
                         format_revision_clarification_reply(task, instruction), route_source
                     )
                     self._send_or_reply(task, reply)
-                    return self._response(task, reply)
+                    return self._response(task, patch)
                 self._apply_single_patch(task, patch)
                 summaries.append(_single_patch_summary(patch))
+                change_details.append(
+                    f"{target}: {patch.operation} {patch.location}"
+                )
 
             effective_source = "fallback" if used_fallback else (route_source or "llm")
+            combined_detail = "\n".join(change_details) if change_details else ""
             revision = RevisionRecord(
                 revision_id=str(uuid.uuid4()),
                 instruction=instruction,
                 target_artifacts=targets,
                 summary=route_reason or "；".join(summaries),
+                change_detail=combined_detail,
             )
             task.revisions.append(revision)
             self.state_service.update_status(task, "DONE")
-            reply = with_fallback_notice(format_revision_reply(task, revision), effective_source)
+            reply = with_fallback_notice(
+                format_revision_reply(task, revision), effective_source
+            )
             self._send_or_reply(task, reply)
             return self._response(task, reply)
         except Exception as exc:
+            logger.error("Revision failed (task_id=%s): %s", task_id, exc, exc_info=True)
             task.error = str(exc)
             self.state_service.update_status(task, "FAILED")
             reply = format_error_reply(task)
@@ -385,7 +602,7 @@ class AgentPilotOrchestrator:
             if existing:
                 artifact = self.lark_client.update_slides(task.task_id, existing, updated_slides, task_dir)
             else:
-                self._execute_artifact(task, "create_slides", "Agent-Pilot 5 页汇报演示文稿", updated_slides)
+                self._execute_artifact(task, "create_slides", "Agent-Pilot 汇报演示文稿", updated_slides)
                 return
         else:
             mermaid = _read_text_artifact(existing) or build_canvas_artifact(task)
@@ -411,6 +628,9 @@ class AgentPilotOrchestrator:
         if command.type == "health":
             self._send_command_reply(command, "Agent-Pilot 在线。请直接发送办公协同任务，或回复「确认」「现在做到哪了？」「修改：...」。")
             return None
+        if command.type == "chat":
+            self._send_command_reply(command, "收到。如需生成文档、PPT 或画板，请直接描述你的任务。回复「帮助」查看可用命令。")
+            return None
         if command.type == "new_task":
             return self.create_task(
                 TaskCreateRequest(
@@ -425,13 +645,19 @@ class AgentPilotOrchestrator:
             return None
         task_id = command.task_id or self.state_service.get_active_task_id(command.chat_id or "")
         if not task_id:
-            if command.type in {"confirm", "confirm_reset", "progress", "revise"}:
+            if command.type in {"confirm", "confirm_reset", "progress", "revise", "clarify", "feedback", "rehearse"}:
                 self._send_command_reply(command, format_no_active_task_reply())
             return None
         if command.type == "confirm":
             return self.confirm_task(task_id)
         if command.type == "progress":
             return self.get_progress(task_id)
+        if command.type == "clarify":
+            return self.handle_clarification(task_id, command.text)
+        if command.type == "feedback":
+            return self.handle_feedback(task_id, command.text)
+        if command.type == "rehearse":
+            return self.handle_rehearse(task_id)
         if command.type == "revise":
             route_has_metadata = bool(
                 command.target_artifacts
@@ -484,7 +710,7 @@ class AgentPilotOrchestrator:
         if "doc" in targets:
             self._execute_artifact(task, "create_doc", "Agent-Pilot 项目方案", build_doc_artifact(task))
         if "slides" in targets:
-            self._execute_artifact(task, "create_slides", "Agent-Pilot 5 页汇报演示文稿", build_slide_artifact(task))
+            self._execute_artifact(task, "create_slides", "Agent-Pilot 汇报演示文稿", build_slide_artifact(task))
         if "canvas" in targets:
             self._execute_artifact(task, "create_canvas", "Agent-Pilot 编排架构画板", build_canvas_artifact(task))
         self.state_service.save_task(task)
@@ -522,7 +748,7 @@ class AgentPilotOrchestrator:
                     self._execute_artifact(
                         task,
                         "create_slides",
-                        "Agent-Pilot 5 页汇报演示文稿",
+                        "Agent-Pilot 汇报演示文稿",
                         updated_slides,
                     )
             else:
@@ -599,7 +825,11 @@ class AgentPilotOrchestrator:
             messages = [
                 {
                     "role": "system",
-                    "content": "你是 Agent-Pilot。根据刚刚完成的任务和产物，生成一条后续建议（1-2 句话）。例如：检测到方案中未涉及某方面，是否需要补充？如果不需要建议，返回空字符串。",
+                    "content": (
+                        "你是 Agent-Pilot。根据刚刚完成的任务和产物，生成一条有洞察力的后续建议（2-3 句话）。"
+                        "例如：检测到方案中未涉及某方面，是否需要补充？发现某个风险点需要进一步讨论？"
+                        "如果不需要建议，返回空字符串。建议应具体、可操作。"
+                    ),
                 },
                 {
                     "role": "user",
@@ -611,7 +841,28 @@ class AgentPilotOrchestrator:
                 return ""
             return f"\U0001F4AD {result}"
         except Exception:
+            logger.debug("Failed to generate proactive suggestion (task_id=%s).", task.task_id, exc_info=True)
             return ""
+
+
+def _dynamic_doc_title(task: AgentPilotTask) -> str:
+    if task.plan and task.plan.summary:
+        short = task.plan.summary.split("。")[0][:40]
+        return short if short else "方案文档"
+    return f"方案文档 - {task.input_text[:30]}"
+
+
+def _dynamic_slides_title(task: AgentPilotTask) -> str:
+    if task.plan and task.plan.summary:
+        short = task.plan.summary.split("。")[0][:30]
+        return f"{short} - 汇报演示" if short else "汇报演示文稿"
+    return "汇报演示文稿"
+
+
+def _build_change_detail(target: str, instruction: str, summary: str) -> str:
+    label = {"doc": "文档", "slides": "Slides", "canvas": "Canvas"}.get(target, target)
+    summary_text = summary or f"已按「{instruction[:30]}...」重写内容"
+    return f"{label}: {summary_text}"
 
 
 def _message_id_from_result(result: dict) -> str | None:
@@ -704,3 +955,5 @@ def _parse_iso_to_float_s(iso_str: str) -> float | None:
         return datetime.fromisoformat(iso_str).timestamp()
     except (ValueError, TypeError):
         return None
+
+

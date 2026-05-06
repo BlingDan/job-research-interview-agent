@@ -26,9 +26,21 @@ class _FakeRevisionLLM:
 @pytest.fixture(autouse=True)
 def _patch_revision_llm(monkeypatch):
     """Avoid real LLM calls across all orchestrator tests."""
-    from app.agents import artifact_revision_agent, canvas_agent, doc_agent, presentation_agent
+    from app.agents import (
+        artifact_revision_agent,
+        canvas_agent,
+        doc_agent,
+        intent_router_agent,
+        presentation_agent,
+    )
 
-    for mod in (artifact_revision_agent, doc_agent, presentation_agent, canvas_agent):
+    for mod in (
+        artifact_revision_agent,
+        canvas_agent,
+        doc_agent,
+        intent_router_agent,
+        presentation_agent,
+    ):
         monkeypatch.setattr(mod, "JobResearchLLM", _FakeRevisionLLM)
 
 
@@ -156,7 +168,7 @@ def test_create_task_sends_plan_after_planning_completes(tmp_path, monkeypatch):
 
     planning_finished = False
 
-    def track_plan_builder(message: str):
+    def track_plan_builder(message: str, chat_history=None):
         nonlocal planning_finished
         result = build_fallback_plan(message)
         planning_finished = True

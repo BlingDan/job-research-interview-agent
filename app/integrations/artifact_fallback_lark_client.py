@@ -28,6 +28,9 @@ class ArtifactFallbackLarkClient:
     def update_message(self, message_id: str, text: str) -> dict:
         return self.primary.update_message(message_id, text)
 
+    def fetch_recent_messages(self, chat_id: str, limit: int = 50) -> list[dict]:
+        return self.primary.fetch_recent_messages(chat_id, limit)
+
     def create_doc(
         self, task_id: str, title: str, content: str, task_dir: Path
     ) -> ArtifactRef:

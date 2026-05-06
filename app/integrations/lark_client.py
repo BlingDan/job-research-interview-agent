@@ -22,6 +22,9 @@ class LarkClient(Protocol):
     def update_message(self, message_id: str, text: str) -> dict:
         ...
 
+    def fetch_recent_messages(self, chat_id: str, limit: int = 50) -> list[dict]:
+        ...
+
     def create_doc(
         self, task_id: str, title: str, content: str, task_dir: Path
     ) -> ArtifactRef:

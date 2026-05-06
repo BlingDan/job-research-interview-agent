@@ -159,3 +159,107 @@ def test_llm_router_parses_structured_route(monkeypatch):
     assert route.confidence == 0.93
     assert route.needs_clarification is False
     assert route.route_source == "llm"
+
+
+class TestChatIntent:
+    def test_time_query_routes_to_chat_via_llm(self, monkeypatch):
+        monkeypatch.setenv("AGENT_PILOT_ROUTER_MODE", "auto")
+        from app.core.config import get_settings
+        get_settings.cache_clear()
+        from app.agents import intent_router_agent
+
+        class FakeLLM:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+            def invoke(self, messages):
+                return '{"command_type": "chat", "confidence": 0.9, "reason": "time query"}'
+
+        monkeypatch.setattr(intent_router_agent, "JobResearchLLM", FakeLLM)
+        route = route_agent_pilot_message("当前时间")
+        assert route.command_type == "chat"
+        assert route.route_source == "llm"
+
+    def test_time_query_variants_via_llm(self, monkeypatch):
+        monkeypatch.setenv("AGENT_PILOT_ROUTER_MODE", "auto")
+        from app.core.config import get_settings
+        get_settings.cache_clear()
+        from app.agents import intent_router_agent
+
+        class FakeLLM:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+            def invoke(self, messages):
+                return '{"command_type": "chat", "confidence": 0.9, "reason": "time query"}'
+
+        monkeypatch.setattr(intent_router_agent, "JobResearchLLM", FakeLLM)
+        for text in ("现在几点", "几点了", "当前时间?", "现在时间"):
+            route = route_agent_pilot_message(text)
+            assert route.command_type == "chat", f"{text!r} → {route.command_type}"
+            assert route.route_source == "llm"
+
+    def test_gratitude_routes_to_chat_via_llm(self, monkeypatch):
+        monkeypatch.setenv("AGENT_PILOT_ROUTER_MODE", "auto")
+        from app.core.config import get_settings
+        get_settings.cache_clear()
+        from app.agents import intent_router_agent
+
+        class FakeLLM:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+            def invoke(self, messages):
+                return '{"command_type": "chat", "confidence": 0.9, "reason": "gratitude"}'
+
+        monkeypatch.setattr(intent_router_agent, "JobResearchLLM", FakeLLM)
+        for text in ("谢谢", "感谢", "辛苦了", "多谢"):
+            route = route_agent_pilot_message(text)
+            assert route.command_type == "chat", f"{text!r} → {route.command_type}"
+            assert route.route_source == "llm"
+
+    def test_capability_question_routes_to_chat_via_llm(self, monkeypatch):
+        monkeypatch.setenv("AGENT_PILOT_ROUTER_MODE", "auto")
+        from app.core.config import get_settings
+        get_settings.cache_clear()
+        from app.agents import intent_router_agent
+
+        class FakeLLM:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+            def invoke(self, messages):
+                return '{"command_type": "chat", "confidence": 0.9, "reason": "capability question"}'
+
+        monkeypatch.setattr(intent_router_agent, "JobResearchLLM", FakeLLM)
+        for text in ("你是谁", "你能做什么", "你会什么", "你有什么功能"):
+            route = route_agent_pilot_message(text)
+            assert route.command_type == "chat", f"{text!r} → {route.command_type}"
+            assert route.route_source == "llm"
+
+    def test_fallback_defaults_new_task_for_short_ambiguous(self):
+        route = route_agent_pilot_message("嗯")
+        assert route.command_type == "new_task"
+        assert route.route_source == "fallback"
+
+    def test_hello_stays_health(self):
+        route = route_agent_pilot_message("你好")
+        assert route.command_type == "health"
+
+    def test_product_mode_task_via_llm(self, monkeypatch):
+        monkeypatch.setenv("AGENT_PILOT_ROUTER_MODE", "auto")
+        from app.core.config import get_settings
+        get_settings.cache_clear()
+        from app.agents import intent_router_agent
+
+        class FakeLLM:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+            def invoke(self, messages):
+                return '{"command_type": "new_task", "confidence": 0.9, "reason": "task request"}'
+
+        monkeypatch.setattr(intent_router_agent, "JobResearchLLM", FakeLLM)
+        route = route_agent_pilot_message("帮我写一份周报")
+        assert route.command_type == "new_task"
+        assert route.route_source == "llm"

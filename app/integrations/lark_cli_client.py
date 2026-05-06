@@ -110,6 +110,23 @@ class LarkCliClient:
             ]
         )
 
+    def fetch_recent_messages(self, chat_id: str, limit: int = 50) -> list[dict]:
+        try:
+            return self._run(
+                [
+                    "im",
+                    "+messages-list",
+                    "--as",
+                    "bot",
+                    "--chat-id",
+                    chat_id,
+                    "--limit",
+                    str(limit),
+                ]
+            ).get("messages", [])
+        except Exception:
+            return []
+
     def create_doc(
         self, task_id: str, title: str, content: str, task_dir: Path
     ) -> ArtifactRef:

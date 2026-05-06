@@ -11,6 +11,15 @@ class FakeLarkClient:
         self.base_url = base_url.rstrip("/")
         self.sent_messages: list[dict] = []
         self._message_counter = 0
+        self._chat_histories: dict[str, list[dict]] = {}
+
+    def seed_chat_history(self, chat_id: str, messages: list[dict]) -> None:
+        """Pre-populate chat history for testing/demo. Each message: {sender_name, content, timestamp}"""
+        self._chat_histories[chat_id] = messages
+
+    def fetch_recent_messages(self, chat_id: str, limit: int = 50) -> list[dict]:
+        history = self._chat_histories.get(chat_id, [])
+        return history[-limit:] if len(history) > limit else history
 
     def send_message(self, chat_id: str, text: str) -> dict:
         payload = {"mode": "fake", "chat_id": chat_id, "text": text, "message_id": self._next_message_id()}

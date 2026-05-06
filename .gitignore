@@ -41,6 +41,9 @@ env/
 # Testing
 .pytest_cache/
 .pytest_tmp/
+.pytest_tmp_agent_pilot_api/
+.tmp_pytest_agent_api/
+pytest_tmp_api/
 .coverage
 htmlcov/
 .tox/
@@ -57,12 +60,33 @@ Thumbs.db
 # Project specific
 *.tmp
 *.temp
+Bn
 Record.md
 基于 IM 的办公协同智能助手（公开版）.md
 reference_docs/
 workspace/
 workspaces/
+workspace_manual_ascii/
+workspace_manual_ascii_refactor/
+workspace_test_surface/
+workspace_test_surface2/
+workspace_test_surface3/
 model/
+.tmp_flutter_home/
+.claude/plan/
+
+# Frontend
+node_modules/
+clients/agent_pilot_cockpit/node_modules/
+clients/agent_pilot_cockpit/*.tsbuildinfo
+clients/agent_pilot_cockpit/vite.config.js
+clients/agent_pilot_cockpit/vite.config.d.ts
+
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.flutter_tool_state
 
 # Pyright
 pyrightconfig.json

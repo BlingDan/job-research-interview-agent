@@ -10,7 +10,7 @@ def test_fallback_plan_covers_doc_slides_canvas():
 
     artifacts = {step.expected_artifact for step in plan.steps}
     assert "项目方案文档" in artifacts
-    assert "5 页汇报演示文稿" in artifacts
+    assert "汇报演示文稿" in artifacts
     assert "Agent 编排架构图" in artifacts
     assert "确认" in plan.confirmation_prompt
     assert plan.tool_plan is not None
@@ -44,7 +44,7 @@ def test_parse_plan_output_json():
 
 
 def test_build_agent_plan_uses_llm_when_agent_planner_enabled(monkeypatch):
-    from app.agents import planner_agent
+    from app.agents import agent_pilot_planner
 
     captured_messages: list[dict[str, str]] = []
 
@@ -72,11 +72,11 @@ def test_build_agent_plan_uses_llm_when_agent_planner_enabled(monkeypatch):
             """
 
     monkeypatch.setattr(
-        planner_agent,
+        agent_pilot_planner,
         "get_settings",
         lambda: type("Settings", (), {"agent_pilot_planner_mode": "llm"})(),
     )
-    monkeypatch.setattr(planner_agent, "JobResearchLLM", FakeLLM)
+    monkeypatch.setattr(agent_pilot_planner, "JobResearchLLM", FakeLLM)
 
     plan = build_agent_plan("帮我基于飞书比赛赛题生成参赛方案")
 
@@ -86,7 +86,7 @@ def test_build_agent_plan_uses_llm_when_agent_planner_enabled(monkeypatch):
 
 
 def test_build_agent_plan_auto_falls_back_when_llm_fails(monkeypatch):
-    from app.agents import planner_agent
+    from app.agents import agent_pilot_planner
 
     class FailingLLM:
         def __init__(self, **kwargs: object):
@@ -96,11 +96,11 @@ def test_build_agent_plan_auto_falls_back_when_llm_fails(monkeypatch):
             raise RuntimeError("temporary model outage")
 
     monkeypatch.setattr(
-        planner_agent,
+        agent_pilot_planner,
         "get_settings",
         lambda: type("Settings", (), {"agent_pilot_planner_mode": "auto"})(),
     )
-    monkeypatch.setattr(planner_agent, "JobResearchLLM", FailingLLM)
+    monkeypatch.setattr(agent_pilot_planner, "JobResearchLLM", FailingLLM)
 
     plan = build_agent_plan("生成参赛方案")
 

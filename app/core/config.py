@@ -26,9 +26,16 @@ class Settings(BaseSettings):
     agent_pilot_default_chat_id: str | None = None
     agent_pilot_auto_confirm: bool = False
     agent_pilot_background_auto_confirm: bool = False
+    agent_pilot_product_mode: bool = False
+    agent_pilot_chat_context_limit: int = 50
+    agent_pilot_confidence_high_threshold: float = 0.9
+    agent_pilot_confidence_medium_threshold: float = 0.7
+    agent_pilot_countdown_seconds: int = 10
     agent_pilot_planner_mode: Literal["fallback", "auto", "llm"] = "auto"
+    agent_pilot_planner_timeout_seconds: float = 20.0
     agent_pilot_router_mode: Literal["fallback", "auto", "llm"] = "auto"
-    agent_pilot_router_timeout_seconds: float = 15.0
+    agent_pilot_router_timeout_seconds: float = 8.0
+    agent_pilot_chat_context_timeout_seconds: float = 5.0
     feishu_tool_mode: Literal["hybrid", "mcp", "lark_cli", "fake"] = "hybrid"
     feishu_mcp_mode: Literal["off", "dry_run", "real"] = "off"
     feishu_mcp_app_id: str = ""
