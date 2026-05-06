@@ -1,5 +1,5 @@
 from app.schemas.agent_pilot import AgentPilotTask
-from app.services.state_service import StateService
+from app.shared.state_service import StateService
 
 
 def test_save_and_load_task(tmp_path):
@@ -26,4 +26,3 @@ def test_update_status_persists(tmp_path):
     loaded = service.load_task("task-1")
 
     assert loaded.status == "WAITING_CONFIRMATION"
-

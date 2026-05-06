@@ -36,25 +36,29 @@ export function getArtifact(taskId: string, kind: string): Promise<ArtifactPrevi
 }
 
 export function createCommand(message: string): Promise<TaskDetail> {
-  return postJson<TaskDetail>("/api/im/commands", {
+  return postJson<{ task_id: string }>("/api/im/commands", {
     message,
     chat_id: "cockpit_demo",
     message_id: `cockpit_${Date.now()}`,
-  });
+  }).then((payload) => getTask(payload.task_id));
 }
 
 export function confirmTask(taskId: string): Promise<TaskDetail> {
-  return postJson<TaskDetail>(`/api/assistant/tasks/${taskId}/actions/confirm`);
+  return postJson<{ task_id: string }>(`/api/assistant/tasks/${taskId}/actions/confirm`).then(() =>
+    getTask(taskId),
+  );
 }
 
 export function resetTask(taskId: string): Promise<TaskDetail> {
-  return postJson<TaskDetail>(`/api/assistant/tasks/${taskId}/actions/reset`);
+  return postJson<{ task_id: string }>(`/api/assistant/tasks/${taskId}/actions/reset`).then(() =>
+    getTask(taskId),
+  );
 }
 
 export function reviseTask(taskId: string, instruction: string): Promise<TaskDetail> {
-  return postJson<TaskDetail>(`/api/assistant/tasks/${taskId}/actions/revise`, {
+  return postJson<{ task_id: string }>(`/api/assistant/tasks/${taskId}/actions/revise`, {
     instruction,
-  });
+  }).then(() => getTask(taskId));
 }
 
 export function openTaskSocket(taskId: string): WebSocket {

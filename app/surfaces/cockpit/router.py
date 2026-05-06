@@ -5,8 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 
 from app.core.config import get_settings
-from app.schemas.agent_pilot import AgentPilotResponse
-from app.shared.snapshots import summarize_task
+from app.shared.snapshots import build_surface_detail, summarize_task
 from app.shared.state_service import DbStateService
 
 
@@ -24,23 +23,13 @@ def list_tasks(status: str | None = None, limit: int = 50):
     return {"tasks": [summarize_task(task) for task in tasks]}
 
 
-@router.get("/tasks/{task_id}", response_model=AgentPilotResponse)
+@router.get("/tasks/{task_id}")
 def get_task_detail(task_id: str):
     state = _get_state()
     task = state.load_task_or_none(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="task not found")
-    return AgentPilotResponse(
-        task_id=task.task_id,
-        status=task.status,
-        plan=task.plan,
-        artifact_brief=task.artifact_brief,
-        artifacts=task.artifacts,
-        tool_executions=task.tool_executions,
-        revisions=task.revisions,
-        reply="",
-        error=task.error,
-    )
+    return build_surface_detail(task, "cockpit")
 
 
 @router.get("/tasks/{task_id}/artifacts/{kind}")

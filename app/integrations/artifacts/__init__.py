@@ -1,5 +1,5 @@
 from app.integrations.artifact_fallback_lark_client import ArtifactFallbackLarkClient
-from app.services.feishu_tool_layer import (
+from app.integrations.artifacts.tool_layer import (
     FeishuMcpToolAdapter,
     FeishuToolLayer,
     LarkCliToolAdapter,

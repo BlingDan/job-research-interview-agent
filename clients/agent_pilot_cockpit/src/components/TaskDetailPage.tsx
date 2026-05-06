@@ -26,33 +26,9 @@ export function TaskDetailPage({
     );
   }
 
-  const actions: TaskAction[] =
-    task.status === "WAITING_CONFIRMATION"
-      ? [
-          {
-            type: "confirm",
-            label: "Confirm task",
-            task_id: task.task_id,
-            description: "Continue the current plan.",
-            endpoint: `/api/assistant/tasks/${task.task_id}/actions/confirm`,
-          },
-          {
-            type: "reset",
-            label: "Reset binding",
-            task_id: task.task_id,
-            description: "Clear the current IM binding.",
-            endpoint: `/api/assistant/tasks/${task.task_id}/actions/reset`,
-          },
-        ]
-      : [
-          {
-            type: "revise",
-            label: "Request revision",
-            task_id: task.task_id,
-            description: "Create a targeted artifact update.",
-            endpoint: `/api/assistant/tasks/${task.task_id}/actions/revise`,
-          },
-        ];
+  const snapshot = task.snapshot;
+  const taskView = snapshot.task;
+  const actions: TaskAction[] = snapshot.actions;
 
   return (
     <section className="detail-column">
@@ -64,20 +40,20 @@ export function TaskDetailPage({
           </div>
           <span className="badge">{task.status}</span>
         </div>
-        <p className="detail-summary">{task.plan?.summary || task.reply || "Task detail is available once planning starts."}</p>
+        <p className="detail-summary">{taskView.summary || taskView.input_text || "Task detail is available once planning starts."}</p>
       </section>
 
       <PendingActionsPanel actions={actions} onAction={onAction} />
 
       <ArtifactPreviewPanel
-        artifacts={task.artifacts}
+        artifacts={snapshot.artifacts}
         selectedKind={selectedKind}
         onSelectKind={onSelectKind}
         preview={preview}
       />
 
       <ExecutionTimelinePanel
-        plan={task.plan}
+        steps={taskView.steps}
         toolExecutions={task.tool_executions}
         revisions={task.revisions}
       />

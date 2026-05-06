@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from app.core.config import get_settings
-from app.shared.snapshots import build_surface_snapshot, summarize_task
+from app.shared.snapshots import build_surface_detail, build_surface_snapshot, summarize_task
 from app.shared.state_service import DbStateService
 
 
@@ -33,5 +33,4 @@ def get_task(task_id: str):
     task = _get_state().load_task_or_none(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="task not found")
-    snapshot = build_surface_snapshot(task, "mobile")
-    return {"surface": "mobile", "snapshot": snapshot.model_dump()}
+    return build_surface_detail(task, "mobile")

@@ -1,13 +1,13 @@
-import type { AgentPlan, RevisionRecord, ToolExecutionRecord } from "../types";
+import type { RevisionRecord, TaskStep, ToolExecutionRecord } from "../types";
 
 interface ExecutionTimelinePanelProps {
-  plan?: AgentPlan | null;
+  steps: TaskStep[];
   toolExecutions: ToolExecutionRecord[];
   revisions: RevisionRecord[];
 }
 
 export function ExecutionTimelinePanel({
-  plan,
+  steps,
   toolExecutions,
   revisions,
 }: ExecutionTimelinePanelProps) {
@@ -23,12 +23,12 @@ export function ExecutionTimelinePanel({
         <div>
           <h4>Plan Steps</h4>
           <ul className="timeline-list">
-            {plan?.steps?.map((step) => (
+            {steps.length ? steps.map((step) => (
               <li key={step.id}>
                 <strong>{step.title}</strong>
-                <span>{step.agent} via {step.tool}</span>
+                <span>{step.agent} via {step.tool} · {step.status}</span>
               </li>
-            )) || <li><span>No plan steps yet.</span></li>}
+            )) : <li><span>No plan steps yet.</span></li>}
           </ul>
         </div>
         <div>

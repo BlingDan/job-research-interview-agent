@@ -89,6 +89,23 @@ def summarize_task(task: AgentPilotTask) -> dict[str, object]:
     }
 
 
+def build_surface_detail(task: AgentPilotTask, surface: str) -> dict[str, object]:
+    snapshot = build_surface_snapshot(task, surface)
+    return {
+        "surface": surface,
+        "task_id": task.task_id,
+        "status": snapshot.task.status,
+        "snapshot": snapshot.model_dump(),
+        "plan": task.plan.model_dump() if task.plan else None,
+        "tool_executions": [
+            execution.model_dump() for execution in task.tool_executions
+        ],
+        "revisions": [revision.model_dump() for revision in task.revisions],
+        "updated_at": task.updated_at,
+        "error": task.error,
+    }
+
+
 def _build_actions(task: AgentPilotTask) -> list[TaskAction]:
     actions: list[TaskAction] = []
     if task.status == "WAITING_CONFIRMATION":

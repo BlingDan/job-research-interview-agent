@@ -7,9 +7,9 @@ import pytest
 from app.integrations.fake_lark_client import FakeLarkClient
 from app.integrations.feishu_mcp_client import McpToolInfo, McpToolResult
 from app.schemas.agent_pilot import AgentPilotCommand, TaskCreateRequest
-from app.services.feishu_tool_layer import FeishuMcpToolAdapter, FeishuToolLayer, LarkCliToolAdapter
-from app.services.orchestrator import AgentPilotOrchestrator
-from app.services.state_service import StateService
+from app.assistant.orchestrator import AgentPilotOrchestrator
+from app.integrations.artifacts import FeishuMcpToolAdapter, FeishuToolLayer, LarkCliToolAdapter
+from app.shared.state_service import StateService
 from app.services.task_message_service import TaskMessageService
 
 

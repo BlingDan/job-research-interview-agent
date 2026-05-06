@@ -5,6 +5,7 @@ import asyncio
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.shared.event_bus import event_bus
+from app.shared.snapshots import build_surface_detail, summarize_task
 from app.shared.state_service import DbStateService
 
 
@@ -29,12 +30,15 @@ async def ws_task(task_id: str, websocket: WebSocket) -> None:
             await websocket.send_json(
                 {
                     "type": "task_state",
-                    "data": task.model_dump(),
+                    "data": build_surface_detail(task, "cockpit"),
                 }
             )
         while True:
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=30)
+                latest = state.load_task_or_none(task_id)
+                if latest is not None:
+                    event["data"] = build_surface_detail(latest, "cockpit")
                 await websocket.send_json(event)
             except asyncio.TimeoutError:
                 await websocket.send_json({"type": "ping"})
@@ -54,12 +58,13 @@ async def ws_task_list(websocket: WebSocket) -> None:
         await websocket.send_json(
             {
                 "type": "task_list",
-                "data": [task.model_dump() for task in tasks],
+                "data": [summarize_task(task) for task in tasks],
             }
         )
         while True:
             try:
                 event = await asyncio.wait_for(queue.get(), timeout=30)
+                event["data"] = [summarize_task(task) for task in state.list_tasks(limit=20)]
                 await websocket.send_json(event)
             except asyncio.TimeoutError:
                 await websocket.send_json({"type": "ping"})

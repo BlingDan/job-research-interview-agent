@@ -9,7 +9,7 @@ from app.integrations.fake_lark_client import FakeLarkClient
 from app.integrations.hybrid_lark_client import HybridLarkClient
 from app.integrations.lark_cli_client import LarkCliClient
 from app.main import app
-from app.services.feishu_tool_layer import FeishuMcpToolAdapter
+from app.integrations.artifacts import FeishuMcpToolAdapter
 
 
 def _configure_env(monkeypatch, tmp_path):

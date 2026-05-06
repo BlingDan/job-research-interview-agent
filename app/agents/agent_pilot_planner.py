@@ -9,7 +9,7 @@ from app.core.config import get_settings
 from app.core.llm import JobResearchLLM
 from app.core.logging import get_logger
 from app.schemas.agent_pilot import AgentPlan, ChatMessage, PlanStep
-from app.services.feishu_tool_registry import build_default_tool_plan
+from app.integrations.artifacts.tool_registry import build_default_tool_plan
 
 logger = get_logger()
 
