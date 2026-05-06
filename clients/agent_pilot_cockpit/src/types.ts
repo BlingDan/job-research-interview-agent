@@ -30,19 +30,30 @@ export interface TaskSummary {
   updated_at: string;
 }
 
-export interface PlanStep {
+export interface TaskStep {
   id: string;
   title: string;
   goal: string;
   agent: string;
   tool: string;
+  status: string;
   expected_artifact?: string | null;
 }
 
-export interface AgentPlan {
-  summary: string;
-  confirmation_prompt?: string;
-  steps: PlanStep[];
+export interface SurfaceTask {
+  task_id: string;
+  input_text: string;
+  status: string;
+  summary?: string | null;
+  chat_id?: string | null;
+  message_id?: string | null;
+  user_id?: string | null;
+  steps: TaskStep[];
+  artifacts: TaskArtifact[];
+  actions: TaskAction[];
+  created_at: string;
+  updated_at: string;
+  error?: string | null;
 }
 
 export interface RevisionRecord {
@@ -64,14 +75,18 @@ export interface ToolExecutionRecord {
 }
 
 export interface TaskDetail {
+  surface: string;
   task_id: string;
   status: string;
-  plan?: AgentPlan | null;
-  artifact_brief?: Record<string, unknown> | null;
-  artifacts: TaskArtifact[];
+  snapshot: {
+    surface: string;
+    task: SurfaceTask;
+    actions: TaskAction[];
+    artifacts: TaskArtifact[];
+  };
   tool_executions: ToolExecutionRecord[];
   revisions: RevisionRecord[];
-  reply: string;
+  updated_at: string;
   error?: string | null;
 }
 

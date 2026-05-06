@@ -5,7 +5,7 @@ from app.integrations.fake_lark_client import FakeLarkClient
 from app.integrations.feishu_mcp_client import McpToolInfo, McpToolResult
 from app.schemas.agent_pilot import ArtifactRef
 from app.schemas.agent_pilot import ToolCallPlan
-from app.services.feishu_tool_layer import (
+from app.integrations.artifacts.tool_layer import (
     FeishuMcpToolAdapter,
     FeishuToolLayer,
     LarkCliToolAdapter,

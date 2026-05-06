@@ -8,7 +8,7 @@ from app.shared.models import (
     TaskStep,
 )
 from app.shared.state_service import DbStateService, StateService
-from app.shared.snapshots import build_surface_snapshot, summarize_task
+from app.shared.snapshots import build_surface_detail, build_surface_snapshot, summarize_task
 
 __all__ = [
     "DbStateService",
@@ -20,6 +20,7 @@ __all__ = [
     "TaskArtifact",
     "TaskEvent",
     "TaskStep",
+    "build_surface_detail",
     "build_surface_snapshot",
     "event_bus",
     "summarize_task",

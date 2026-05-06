@@ -1,7 +1,7 @@
 from app.integrations.fake_lark_client import FakeLarkClient
+from app.assistant.orchestrator import AgentPilotOrchestrator
 from app.schemas.agent_pilot import TaskCreateRequest
-from app.services.orchestrator import AgentPilotOrchestrator
-from app.services.state_service import StateService
+from app.shared.state_service import StateService
 from app.services.task_message_service import TaskMessageService
 from scripts.lark_event_listener import (
     handle_event_line,

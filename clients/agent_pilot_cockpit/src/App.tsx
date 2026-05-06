@@ -52,7 +52,7 @@ export default function App() {
           return;
         }
         setTaskDetail(detail);
-        const firstKind = detail.artifacts[0]?.kind ?? null;
+        const firstKind = detail.snapshot.artifacts[0]?.kind ?? null;
         setSelectedKind((current) => current ?? firstKind);
       })
       .catch((nextError) => {
