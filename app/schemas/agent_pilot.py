@@ -10,9 +10,7 @@ AgentPilotStatus = Literal[
     "CREATED",
     "PLANNING",
     "WAITING_CONFIRMATION",
-    "DOC_GENERATING",
-    "PRESENTATION_GENERATING",
-    "CANVAS_GENERATING",
+    "GENERATING",
     "DELIVERING",
     "DONE",
     "REVISING",
@@ -33,6 +31,10 @@ MessageCommandType = Literal[
     "health",
     "help",
     "reset",
+    "clarify",
+    "feedback",
+    "rehearse",
+    "chat",
     "unknown",
 ]
 
@@ -68,11 +70,19 @@ class PlanStep(BaseModel):
     expected_artifact: str | None = None
 
 
+class ChatMessage(BaseModel):
+    sender_name: str = ""
+    content: str
+    timestamp: str | None = None
+
+
 class AgentPlan(BaseModel):
     summary: str
     steps: list[PlanStep] = Field(default_factory=list)
     confirmation_prompt: str = "回复「确认」后我开始生成文档、汇报材料和画板。"
     tool_plan: ToolPlan | None = None
+    confidence: float = 0.5
+    clarification_questions: list[str] = Field(default_factory=list)
 
 
 class ArtifactRef(BaseModel):
@@ -123,6 +133,7 @@ class ArtifactBrief(BaseModel):
     engineering_implementation_points: list[str] = Field(default_factory=list)
     demo_script: list[str] = Field(default_factory=list)
     risk_and_fallback_story: list[str] = Field(default_factory=list)
+    consistency_anchors: dict[str, str] = Field(default_factory=dict)
 
 
 class RevisionRecord(BaseModel):
@@ -130,6 +141,15 @@ class RevisionRecord(BaseModel):
     instruction: str
     target_artifacts: list[ArtifactKind] = Field(default_factory=list)
     summary: str = ""
+    change_detail: str = ""
+    created_at: str = Field(default_factory=utc_now)
+
+
+class FeedbackRecord(BaseModel):
+    feedback_id: str
+    task_id: str
+    rating: Literal["helpful", "needs_improvement"] | None = None
+    comment: str = ""
     created_at: str = Field(default_factory=utc_now)
 
 
@@ -182,6 +202,7 @@ class TaskCreateRequest(BaseModel):
     chat_id: str | None = None
     message_id: str | None = None
     user_id: str | None = None
+    chat_history: list[ChatMessage] = Field(default_factory=list)
 
 
 class TaskActionRequest(BaseModel):

@@ -26,9 +26,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.api.routers.task import build_orchestrator
+from app.assistant.orchestrator import AgentPilotOrchestrator
+from app.assistant.runtime import build_orchestrator
 from app.integrations.lark_cli_client import build_lark_cli_command
-from app.services.orchestrator import AgentPilotOrchestrator
 from app.services.task_message_service import TaskMessageService
 from app.schemas.agent_pilot import AgentPilotResponse
 

@@ -13,7 +13,7 @@ def test_agent_pilot_config_defaults():
     assert settings.agent_pilot_background_auto_confirm is False
     assert settings.agent_pilot_planner_mode == "fallback"
     assert settings.agent_pilot_router_mode == "fallback"
-    assert settings.agent_pilot_router_timeout_seconds == 15.0
+    assert settings.agent_pilot_router_timeout_seconds == 8.0
     assert settings.feishu_tool_mode == "hybrid"
     assert settings.feishu_mcp_mode == "off"
     assert settings.feishu_mcp_app_id == ""

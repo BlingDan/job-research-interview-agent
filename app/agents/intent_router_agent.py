@@ -69,8 +69,14 @@ _COMMAND_TYPES: set[str] = {
     "health",
     "help",
     "reset",
+    "clarify",
+    "feedback",
+    "rehearse",
+    "chat",
     "unknown",
 }
+
+
 _ARTIFACT_KINDS: set[str] = {"doc", "slides", "canvas"}
 
 
@@ -80,7 +86,7 @@ INTENT_ROUTER_SYSTEM_PROMPT = dedent(
     你的任务是把飞书 IM 文本路由成一个安全、结构化的执行决策。
 
     只返回 JSON 对象，不要 Markdown。字段：
-    - command_type: new_task / confirm / progress / revise / health / help / reset / unknown
+    - command_type: new_task / confirm / progress / revise / clarify / feedback / rehearse / health / help / reset / chat / unknown
     - target_artifacts: doc、slides、canvas 的数组；只有 revise 才需要
     - confidence: 0 到 1
     - needs_clarification: true/false
@@ -88,12 +94,16 @@ INTENT_ROUTER_SYSTEM_PROMPT = dedent(
 
     规则：
     1. 「确认」「现在做到哪了？」「/help」「/reset」等硬命令要直接分类。
-    2. 对已有产物的自然语言编辑属于 revise，即使没有「修改：」前缀。
-    3. 用户提到文档、方案、参赛方案、最后一行、文末、段落、正文，通常指向 doc。
-    4. 用户提到 PPT、Slides、幻灯片、汇报材料、答辩页，通常指向 slides。
-    5. 用户提到 Canvas、画板、白板、架构图、流程图、节点、连线，通常指向 canvas。
-    6. 不要因为修改请求含糊就默认 target_artifacts 为 doc/slides/canvas 全部。
+    2. 「排练」「模拟答辩」「模拟评审」→ rehearse
+    3. 「有帮助」「需要改进」或单独的 👍👎 → feedback
+    4. 对已有产物的自然语言编辑属于 revise，即使没有「修改：」前缀。
+    5. 用户提到文档、方案、参赛方案、最后一行、文末、段落、正文，通常指向 doc。
+    6. 用户提到 PPT、Slides、幻灯片、汇报材料、答辩页，通常指向 slides。
+    7. 用户提到 Canvas、画板、白板、架构图、流程图、节点、连线，通常指向 canvas。
+    8. 不要因为修改请求含糊就默认 target_artifacts 为 doc/slides/canvas 全部。
        如果无法判断目标产物，target_artifacts 为空并 needs_clarification=true。
+    9. 闲聊、问候、致谢、询问时间、询问能力等不涉及文档/任务的操作 → chat。
+    10. 用户表达明确的办公协同意图（写周报、做方案、会议纪要、评审材料等）→ new_task。
     """
 ).strip()
 
@@ -236,6 +246,11 @@ def _route_hard_command(text: str) -> IntentRoute | None:
         "状态",
     }:
         return IntentRoute(command_type="progress", text=normalized, confidence=1.0, route_source="hard_command")
+    if normalized in {"排练", "答辩排练", "模拟答辩", "模拟评审", "rehearse"}:
+        return IntentRoute(command_type="rehearse", text=normalized, confidence=1.0, route_source="hard_command")
+    if normalized in {"有帮助", "有帮助👍", "👍", "需要改进", "需要改进👎", "👎"} or lower in {"helpful", "needs_improvement"}:
+        rating = "helpful" if ("有帮助" in normalized or "👍" in normalized or lower == "helpful") else "needs_improvement"
+        return IntentRoute(command_type="feedback", text=rating, confidence=1.0, route_source="hard_command")
     return None
 
 

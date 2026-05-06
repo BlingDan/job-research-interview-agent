@@ -14,7 +14,7 @@ def build_default_tool_plan() -> ToolPlan:
                 fallback_adapters=["fake"],
                 inputs={"surface": "Feishu IM"},
                 expected_output="绑定到 chat_id/message_id 的任务上下文",
-                user_visible_reason="飞书 IM 是比赛要求的一线入口。",
+                user_visible_reason="飞书 IM 是用户与 Agent 交互的第一入口。",
             ),
             ToolCallPlan(
                 id="planner-task-decomposition",
@@ -32,9 +32,9 @@ def build_default_tool_plan() -> ToolPlan:
                 capability="create_doc",
                 preferred_adapter="mcp",
                 fallback_adapters=["lark_cli", "fake"],
-                inputs={"title": "Agent-Pilot 参赛方案", "format": "markdown"},
+                inputs={"title": "Agent-Pilot 项目方案", "format": "markdown"},
                 expected_output="可分享的飞书文档链接",
-                user_visible_reason="用飞书文档沉淀完整参赛方案。",
+                user_visible_reason="用飞书文档沉淀完整项目方案。",
             ),
             ToolCallPlan(
                 id="slides-create-defense",
@@ -42,9 +42,9 @@ def build_default_tool_plan() -> ToolPlan:
                 capability="create_slides",
                 preferred_adapter="lark_cli",
                 fallback_adapters=["fake"],
-                inputs={"title": "Agent-Pilot 5 页答辩汇报材料", "pages": 5},
+                inputs={"title": "Agent-Pilot 5 页汇报演示文稿", "pages": 5},
                 expected_output="可分享的飞书幻灯片链接",
-                user_visible_reason="用飞书 Slides 支撑现场答辩。",
+                user_visible_reason="用飞书 Slides 支撑现场汇报。",
             ),
             ToolCallPlan(
                 id="whiteboard-create-architecture",

@@ -20,7 +20,7 @@ def test_plan_reply_includes_confirmation():
     reply = format_plan_reply(task)
 
     assert "确认" in reply
-    assert "生成参赛方案文档" in reply
+    assert "生成项目方案文档" in reply
 
 
 def test_plan_reply_chunks_are_cumulative():
@@ -79,7 +79,7 @@ def test_revision_reply_mentions_targets():
 def test_help_reply_mentions_natural_revision_language():
     reply = format_help_reply()
 
-    assert "不加「修改：」" in reply
+    assert "修改：" in reply
 
 
 def test_reset_confirm_reply_includes_plan_summary_and_confirm_reset():

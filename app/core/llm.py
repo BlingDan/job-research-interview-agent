@@ -4,6 +4,9 @@ from typing import Iterator, List, Optional
 from openai import OpenAI
 
 from app.core.config import get_settings
+from app.core.logging import get_logger
+
+logger = get_logger()
 
 
 _MAX_RATE_LIMIT_RETRIES = 2
@@ -96,6 +99,12 @@ class JobResearchLLM:
             except Exception as exc:
                 if self._is_rate_limit_error(exc) and rate_limit_retries < _MAX_RATE_LIMIT_RETRIES:
                     backoff_seconds = self._get_rate_limit_backoff_seconds(exc, rate_limit_retries)
+                    logger.warning(
+                        "LLM rate-limited (attempt %d/%d), retrying in %.1fs.",
+                        rate_limit_retries + 1,
+                        _MAX_RATE_LIMIT_RETRIES + 1,
+                        backoff_seconds,
+                    )
                     time.sleep(backoff_seconds)
                     rate_limit_retries += 1
                     continue

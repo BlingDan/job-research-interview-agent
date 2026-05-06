@@ -59,7 +59,7 @@ class LarkCliClient:
             ]
         )
 
-    def send_interactive_card(self, chat_id: str, text: str) -> dict:
+    def send_interactive_card(self, chat_id: str, text: str, *, header_title: str | None = None) -> dict:
         return self._run(
             [
                 "im",
@@ -71,11 +71,11 @@ class LarkCliClient:
                 "--msg-type",
                 "interactive",
                 "--content",
-                _interactive_card_content(text),
+                _interactive_card_content(text, header_title=header_title),
             ]
         )
 
-    def reply_interactive_card(self, message_id: str, text: str) -> dict:
+    def reply_interactive_card(self, message_id: str, text: str, *, header_title: str | None = None) -> dict:
         return self._run(
             [
                 "im",
@@ -87,11 +87,11 @@ class LarkCliClient:
                 "--msg-type",
                 "interactive",
                 "--content",
-                _interactive_card_content(text),
+                _interactive_card_content(text, header_title=header_title),
             ]
         )
 
-    def update_message(self, message_id: str, text: str) -> dict:
+    def update_message(self, message_id: str, text: str, *, header_title: str | None = None) -> dict:
         return self._run(
             [
                 "api",
@@ -101,7 +101,7 @@ class LarkCliClient:
                 json.dumps(
                     {
                         "msg_type": "interactive",
-                        "content": _interactive_card_content(text),
+                        "content": _interactive_card_content(text, header_title=header_title),
                     },
                     ensure_ascii=False,
                 ),
@@ -109,6 +109,23 @@ class LarkCliClient:
                 "bot",
             ]
         )
+
+    def fetch_recent_messages(self, chat_id: str, limit: int = 50) -> list[dict]:
+        try:
+            return self._run(
+                [
+                    "im",
+                    "+messages-list",
+                    "--as",
+                    "bot",
+                    "--chat-id",
+                    chat_id,
+                    "--limit",
+                    str(limit),
+                ]
+            ).get("messages", [])
+        except Exception:
+            return []
 
     def create_doc(
         self, task_id: str, title: str, content: str, task_dir: Path
@@ -139,7 +156,7 @@ class LarkCliClient:
             title=title,
             local_path=path,
             fallback_url=f"https://dry-run.feishu.local/doc/{task_id}",
-            summary="已生成参赛方案文档。",
+            summary="已生成项目方案文档。",
             metadata={"source_format": "markdown"},
         )
 
@@ -172,7 +189,7 @@ class LarkCliClient:
             title=title,
             local_path=path,
             fallback_url=f"https://dry-run.feishu.local/slides/{task_id}",
-            summary="已生成 5 页答辩汇报材料。",
+            summary="已生成 5 页汇报演示文稿。",
             metadata={
                 "source_format": "json",
                 "slide_ids": _extract_slide_ids(result),
@@ -291,7 +308,7 @@ class LarkCliClient:
             update={
                 "local_path": str(path),
                 "status": "updated",
-                "summary": "已原地更新参赛方案文档。",
+                "summary": "已原地更新项目方案文档。",
                 "metadata": {**artifact.metadata, "source_format": "markdown"},
             }
         )
@@ -338,7 +355,7 @@ class LarkCliClient:
             update={
                 "local_path": str(path),
                 "status": "updated",
-                "summary": "已原地更新 5 页答辩汇报材料。",
+                "summary": "已原地更新 5 页汇报演示文稿。",
                 "metadata": {**artifact.metadata, "source_format": "json"},
             }
         )
@@ -511,22 +528,25 @@ def _text_content(text: str) -> str:
     return json.dumps({"text": text}, ensure_ascii=False)
 
 
-def _interactive_card_content(text: str) -> str:
-    return json.dumps(
-        {
-            "config": {
-                "wide_screen_mode": True,
-                "update_multi": True,
-            },
-            "elements": [
-                {
-                    "tag": "markdown",
-                    "content": text,
-                }
-            ],
+def _interactive_card_content(text: str, *, header_title: str | None = None) -> str:
+    config: dict[str, Any] = {
+        "config": {
+            "wide_screen_mode": True,
+            "update_multi": True,
         },
-        ensure_ascii=False,
-    )
+        "elements": [
+            {
+                "tag": "markdown",
+                "content": text,
+            }
+        ],
+    }
+    if header_title:
+        config["header"] = {
+            "title": {"tag": "plain_text", "content": header_title},
+            "template": "blue",
+        }
+    return json.dumps(config, ensure_ascii=False)
 
 
 def _first_result_value(result: dict[str, Any], *keys: str) -> str | None:
